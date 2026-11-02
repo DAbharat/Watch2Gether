@@ -3,14 +3,17 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { getSocket } from '@/lib/socket';
-import { YouTubePlayer, YouTubePlayerRef } from '@/components/YouTubePlayer';
+import { YouTubePlayerRef } from '@/components/YouTubePlayer';
 import { extractYouTubeId } from '@/lib/youtube';
 import { Role, ParticipantData, RoomState, ChatMessage, ReactionData } from '@/lib/types';
-import { 
-  Play, Pause, RotateCcw, RotateCw, Copy, Check, Users, 
-  MessageSquare, Shield, Crown, UserMinus, LogOut, Send, 
-  AlertCircle, ExternalLink 
-} from 'lucide-react';
+import { toast } from '@/components/ui/toast';
+import { AlertCircle } from 'lucide-react';
+
+import { RoomHeader } from '@/components/room/RoomHeader';
+import { VideoSection } from '@/components/room/VideoSection';
+import { ChangeVideoSection } from '@/components/room/ChangeVideoSection';
+import { RoomSidebar } from '@/components/room/RoomSidebar';
+import { FloatingReactions } from '@/components/room/FloatingReactions';
 
 interface RoomClientProps {
   roomId: string;
@@ -30,7 +33,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [participants, setParticipants] = useState<ParticipantData[]>([]);
   const [hostSocketId, setHostSocketId] = useState<string>('');
   const [kickedMessage, setKickedMessage] = useState<string | null>(null);
-  const [errorToast, setErrorToast] = useState<string | null>(null);
 
   const currentUser = participants.find((p) => p.socketId === socketId);
   const userRole: Role = currentUser?.role || 'participant';
@@ -66,6 +68,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
     const onDisconnect = () => {
       setIsConnected(false);
+      toast.add({
+        title: 'Connection Lost',
+        description: 'Disconnected from the watch party server.',
+        type: 'warning',
+      });
     };
 
     if (socket.connected) {
@@ -131,20 +138,51 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       if (playerRef.current) {
         playerRef.current.loadVideo(newId);
       }
+      toast.add({
+        title: 'Video Updated',
+        description: 'A new video was loaded in the room.',
+        type: 'info',
+      });
     });
 
     socket.on('user_joined', (data: any) => {
       setParticipants(data.participants);
+      if (data.userId !== socket.id) {
+        toast.add({
+          title: 'Participant Joined',
+          description: `${data.username} entered the room.`,
+          type: 'info',
+        });
+      }
     });
 
     socket.on('user_left', (data: any) => {
       setParticipants(data.participants);
       if (data.hostSocketId) setHostSocketId(data.hostSocketId);
+      toast.add({
+        title: 'Participant Left',
+        description: `${data.username} left the party.`,
+        type: 'info',
+      });
     });
 
     socket.on('role_assigned', (data: any) => {
       setParticipants(data.participants);
       if (data.hostSocketId) setHostSocketId(data.hostSocketId);
+
+      if (data.userId === socket.id) {
+        toast.add({
+          title: 'Role Updated',
+          description: `You are now a ${data.role}!`,
+          type: 'success',
+        });
+      } else {
+        toast.add({
+          title: 'Role Changed',
+          description: `${data.username} is now a ${data.role}.`,
+          type: 'info',
+        });
+      }
     });
 
     socket.on('participant_removed', (data: any) => {
@@ -153,11 +191,19 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
     socket.on('kicked', () => {
       setKickedMessage('You have been removed from the room by the host.');
+      toast.add({
+        title: 'Removed from Room',
+        description: 'The host removed you from this watch party.',
+        type: 'error',
+      });
     });
 
     socket.on('error_message', (data: { message: string }) => {
-      setErrorToast(data.message);
-      setTimeout(() => setErrorToast(null), 4000);
+      toast.add({
+        title: 'Action Not Permitted',
+        description: data.message,
+        type: 'error',
+      });
     });
 
     socket.on('new_message', (msg: ChatMessage) => {
@@ -166,7 +212,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
     socket.on('new_reaction', (reaction: { emoji: string; username: string }) => {
       const id = Math.random().toString(36).substring(2, 9);
-      setFloatingReactions((prev) => [...prev, { id, emoji: reaction.emoji, username: reaction.username }]);
+      setFloatingReactions((prev) => [
+        ...prev,
+        { id, emoji: reaction.emoji, username: reaction.username },
+      ]);
       setTimeout(() => {
         setFloatingReactions((prev) => prev.filter((r) => r.id !== id));
       }, 2500);
@@ -224,8 +273,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
     const extractedId = extractYouTubeId(newVideoUrl);
     if (!extractedId) {
-      setErrorToast('Please enter a valid YouTube video URL or ID.');
-      setTimeout(() => setErrorToast(null), 3000);
+      toast.add({
+        title: 'Invalid Video URL',
+        description: 'Please paste a valid YouTube video link or 11-character video ID.',
+        type: 'error',
+      });
       return;
     }
 
@@ -261,360 +313,106 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+    toast.add({
+      title: 'Invite Link Copied',
+      description: 'Room URL copied to your clipboard.',
+      type: 'success',
+    });
   };
 
   if (kickedMessage) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 text-center text-zinc-100">
-        <div className="w-16 h-16 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mb-4">
-          <AlertCircle className="w-8 h-8" />
+      <div className="min-h-screen bg-[#05090a] flex flex-col items-center justify-center p-6 text-center text-zinc-100">
+        <div className="w-12 h-12 rounded-full bg-white/[0.04] border border-white/[0.08] text-zinc-400 flex items-center justify-center mb-4">
+          <AlertCircle className="w-6 h-6" />
         </div>
-        <h1 className="text-2xl font-bold mb-2">Removed from Room</h1>
-        <p className="text-zinc-400 max-w-sm mb-6">{kickedMessage}</p>
+        <h1 className="text-xl font-bold mb-2 text-zinc-200">Removed from Room</h1>
+        <p className="text-zinc-500 max-w-sm mb-6 text-xs">{kickedMessage}</p>
         <button
           onClick={() => router.push('/')}
-          className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold text-white shadow-lg transition-all"
+          className="px-5 py-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] font-medium text-zinc-200 transition-colors text-xs"
         >
-          Return to Home
+          Return to Dashboard
         </button>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
-      {errorToast && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl bg-rose-600/90 text-white text-sm font-medium shadow-2xl backdrop-blur flex items-center gap-2 animate-bounce">
-          <AlertCircle className="w-4 h-4" />
-          {errorToast}
-        </div>
-      )}
-
-      <div className="fixed bottom-24 right-8 pointer-events-none z-40 flex flex-col gap-2 items-end">
-        {floatingReactions.map((r) => (
-          <div
-            key={r.id}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-zinc-900/90 border border-zinc-700/80 shadow-2xl text-lg animate-fade-in-up"
-          >
-            <span>{r.emoji}</span>
-            <span className="text-xs text-zinc-400">{r.username}</span>
-          </div>
-        ))}
+    <div className="min-h-screen bg-[#05090a] text-zinc-100 flex flex-col justify-between selection:bg-teal-400 selection:text-black">
+      {/* Background radial glow */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div
+          className="absolute -top-24 left-1/2 -translate-x-1/2 w-[75vw] max-w-[1200px] h-[450px] blur-[60px] pointer-events-none"
+          style={{
+            background:
+              'radial-gradient(ellipse 75% 450px at 50% 0%, rgba(20, 90, 80, 0.32) 0%, rgba(15, 61, 56, 0.18) 35%, rgba(5, 20, 18, 0.06) 65%, transparent 80%)',
+          }}
+        />
       </div>
 
-      <header className="border-b border-zinc-900 bg-zinc-950/80 backdrop-blur sticky top-0 z-30 px-6 py-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => router.push('/')}
-            className="flex items-center gap-2 text-sm font-bold text-zinc-200 hover:text-white transition-colors"
-          >
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
-              <Play className="w-3.5 h-3.5 text-white fill-white ml-0.5" />
-            </div>
-            <span>Watch2Gether</span>
-          </button>
+      {/* Floating Reactions Overlay */}
+      <FloatingReactions reactions={floatingReactions} />
 
-          <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-300">
-            <span>Room: {roomId}</span>
-            <button
-              onClick={copyRoomLink}
-              title="Copy room invite link"
-              className="text-zinc-400 hover:text-zinc-100 transition-colors"
-            >
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-            </button>
-          </div>
+      {/* Slim, Low-contrast Header */}
+      <RoomHeader
+        roomId={roomId}
+        isConnected={isConnected}
+        userRole={userRole}
+        copied={copied}
+        onCopyRoomLink={copyRoomLink}
+        onLeaveRoom={() => router.push('/')}
+      />
+
+      {/* Main Area: Two-column grid (~70% / 30%) with Equal Height columns */}
+      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-[1fr_360px] xl:grid-cols-[1fr_390px] gap-6 items-stretch">
+        {/* Left Column: Video + Attached Control Bar + Compact Change Video Row */}
+        <div className="flex flex-col gap-3 min-w-0">
+          <VideoSection
+            playerRef={playerRef}
+            videoId={videoId}
+            isPlaying={isPlaying}
+            canControl={canControl}
+            onLocalPlay={(time) => {
+              setIsPlaying(true);
+              socket.emit('play', { roomId, currentTime: time });
+            }}
+            onLocalPause={(time) => {
+              setIsPlaying(false);
+              socket.emit('pause', { roomId, currentTime: time });
+            }}
+            onLocalSeek={(time) => {
+              socket.emit('seek', { roomId, time });
+            }}
+            onTogglePlay={handleTogglePlay}
+            onSeekOffset={handleSeekOffset}
+          />
+
+          <ChangeVideoSection
+            newVideoUrl={newVideoUrl}
+            onVideoUrlChange={setNewVideoUrl}
+            onSubmit={handleChangeVideo}
+            canControl={canControl}
+          />
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-            <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-            <span className="hidden sm:inline">{isConnected ? 'Connected' : 'Connecting...'}</span>
-          </div>
-
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider bg-zinc-900 border border-zinc-800">
-            {isHost && (
-              <>
-                <Crown className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-amber-300">Host</span>
-              </>
-            )}
-            {isModerator && (
-              <>
-                <Shield className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="text-indigo-300">Moderator</span>
-              </>
-            )}
-            {!isHost && !isModerator && (
-              <>
-                <Users className="w-3.5 h-3.5 text-zinc-400" />
-                <span className="text-zinc-400">Viewer</span>
-              </>
-            )}
-          </div>
-
-          <button
-            onClick={() => router.push('/')}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition-colors"
-            title="Leave room"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
-      </header>
-
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 flex flex-col gap-4">
-          <div className="w-full">
-            <YouTubePlayer
-              ref={playerRef}
-              videoId={videoId}
-              canControl={canControl}
-              onLocalPlay={(time) => {
-                setIsPlaying(true);
-                socket.emit('play', { roomId, currentTime: time });
-              }}
-              onLocalPause={(time) => {
-                setIsPlaying(false);
-                socket.emit('pause', { roomId, currentTime: time });
-              }}
-              onLocalSeek={(time) => {
-                socket.emit('seek', { roomId, time });
-              }}
-            />
-          </div>
-
-          <div className="p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800/80 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <button
-                onClick={handleTogglePlay}
-                disabled={!canControl}
-                className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all ${
-                  canControl
-                    ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 active:scale-95'
-                    : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-                }`}
-                title={canControl ? (isPlaying ? 'Pause' : 'Play') : 'Restricted to Host/Moderator'}
-              >
-                {isPlaying ? <Pause className="w-4 h-4 fill-white" /> : <Play className="w-4 h-4 fill-white" />}
-                <span>{isPlaying ? 'Pause' : 'Play'}</span>
-              </button>
-
-              <button
-                onClick={() => handleSeekOffset(-10)}
-                disabled={!canControl}
-                className={`p-2.5 rounded-xl border border-zinc-800 transition-all ${
-                  canControl ? 'bg-zinc-950 hover:bg-zinc-800 text-zinc-300' : 'bg-zinc-900 text-zinc-600 cursor-not-allowed'
-                }`}
-                title="Rewind 10 seconds"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </button>
-
-              <button
-                onClick={() => handleSeekOffset(10)}
-                disabled={!canControl}
-                className={`p-2.5 rounded-xl border border-zinc-800 transition-all ${
-                  canControl ? 'bg-zinc-950 hover:bg-zinc-800 text-zinc-300' : 'bg-zinc-900 text-zinc-600 cursor-not-allowed'
-                }`}
-                title="Forward 10 seconds"
-              >
-                <RotateCw className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="text-xs text-zinc-400 flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${isPlaying ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-              <span>{isPlaying ? 'Syncing Playback' : 'Paused for everyone'}</span>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-zinc-900/60 border border-zinc-800/80">
-            <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              <ExternalLink className="w-3.5 h-3.5 text-indigo-400" /> Change Video (Paste YouTube URL or ID)
-            </h3>
-            <form onSubmit={handleChangeVideo} className="flex gap-2">
-              <input
-                type="text"
-                value={newVideoUrl}
-                onChange={(e) => setNewVideoUrl(e.target.value)}
-                disabled={!canControl}
-                placeholder={canControl ? 'Paste YouTube link (e.g. https://youtu.be/...)' : 'Playback is locked by Host'}
-                className="flex-1 px-4 py-2.5 rounded-xl bg-zinc-950/90 border border-zinc-800 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              />
-              <button
-                type="submit"
-                disabled={!canControl || !newVideoUrl.trim()}
-                className="px-5 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm text-white transition-all flex items-center gap-1.5"
-              >
-                Load Video
-              </button>
-            </form>
-            {!canControl && (
-              <p className="text-[11px] text-zinc-500 mt-2">
-                🔒 You are a <strong>Viewer</strong>. Only the Host and Moderators can change the video or control playback.
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="flex flex-col h-[580px] rounded-2xl bg-zinc-900/80 border border-zinc-800 overflow-hidden shadow-2xl">
-          <div className="flex border-b border-zinc-800 bg-zinc-950/60">
-            <button
-              onClick={() => setActiveTab('chat')}
-              className={`flex-1 py-3 text-xs font-semibold flex items-center justify-center gap-2 border-b-2 transition-all ${
-                activeTab === 'chat'
-                  ? 'border-indigo-500 text-indigo-400 bg-zinc-900/40'
-                  : 'border-transparent text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              <MessageSquare className="w-3.5 h-3.5" />
-              Chat ({messages.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('participants')}
-              className={`flex-1 py-3 text-xs font-semibold flex items-center justify-center gap-2 border-b-2 transition-all ${
-                activeTab === 'participants'
-                  ? 'border-indigo-500 text-indigo-400 bg-zinc-900/40'
-                  : 'border-transparent text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              <Users className="w-3.5 h-3.5" />
-              Participants ({participants.length})
-            </button>
-          </div>
-
-          {activeTab === 'chat' && (
-            <div className="flex-1 flex flex-col justify-between overflow-hidden">
-              <div className="flex-1 p-4 overflow-y-auto space-y-3">
-                {messages.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-zinc-500 text-xs">
-                    <MessageSquare className="w-6 h-6 mb-2 opacity-40" />
-                    <p>No messages yet.</p>
-                    <p className="text-[11px] text-zinc-600">Be the first to say hello!</p>
-                  </div>
-                ) : (
-                  messages.map((m) => (
-                    <div key={m.id} className="flex flex-col gap-0.5 text-xs">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-semibold text-zinc-200">{m.username}</span>
-                        {m.role === 'host' && (
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-medium">
-                            Host
-                          </span>
-                        )}
-                        {m.role === 'moderator' && (
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 font-medium">
-                            Mod
-                          </span>
-                        )}
-                        <span className="text-[10px] text-zinc-500">
-                          {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                      <p className="text-zinc-300 bg-zinc-950/60 p-2 rounded-lg border border-zinc-800/60 break-words">
-                        {m.text}
-                      </p>
-                    </div>
-                  ))
-                )}
-                <div ref={chatBottomRef} />
-              </div>
-
-              <div className="px-3 py-2 border-t border-zinc-800/80 bg-zinc-950/40 flex items-center justify-around">
-                {['🔥', '❤️', '😂', '👏', '🚀'].map((emoji) => (
-                  <button
-                    key={emoji}
-                    onClick={() => handleSendReaction(emoji)}
-                    className="p-1 hover:scale-125 transition-transform text-base"
-                    title={`Send ${emoji} reaction`}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-
-              <form onSubmit={handleSendMessage} className="p-3 border-t border-zinc-800 flex gap-2 bg-zinc-950/80">
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Type a message..."
-                  maxLength={200}
-                  className="flex-1 px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <button
-                  type="submit"
-                  disabled={!chatInput.trim()}
-                  className="p-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40 transition-all"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </form>
-            </div>
-          )}
-
-          {activeTab === 'participants' && (
-            <div className="flex-1 p-4 overflow-y-auto space-y-2">
-              <div className="text-[11px] text-zinc-500 uppercase tracking-wider font-semibold mb-2">
-                Active Participants ({participants.length})
-              </div>
-
-              {participants.map((p) => {
-                const isMe = p.socketId === socketId;
-                return (
-                  <div
-                    key={p.socketId}
-                    className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/80 flex items-center justify-between gap-3 text-xs"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
-                        {p.username.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-zinc-200 truncate flex items-center gap-1.5">
-                          {p.username} {isMe && <span className="text-[10px] text-zinc-500">(You)</span>}
-                        </p>
-                        <span className="text-[10px] capitalize text-zinc-400">
-                          {p.role === 'host' ? '👑 Host' : p.role === 'moderator' ? '🛡️ Moderator' : '👁️ Viewer'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {isHost && !isMe && (
-                      <div className="flex items-center gap-1">
-                        {p.role === 'participant' ? (
-                          <button
-                            onClick={() => handleAssignRole(p.socketId, 'moderator')}
-                            className="px-2 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-[10px] font-medium transition-colors"
-                            title="Promote to Moderator"
-                          >
-                            + Mod
-                          </button>
-                        ) : p.role === 'moderator' ? (
-                          <button
-                            onClick={() => handleAssignRole(p.socketId, 'participant')}
-                            className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-medium transition-colors"
-                            title="Demote to Viewer"
-                          >
-                            - Demote
-                          </button>
-                        ) : null}
-
-                        <button
-                          onClick={() => handleRemoveUser(p.socketId)}
-                          className="p-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition-colors"
-                          title="Remove user from room"
-                        >
-                          <UserMinus className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+        {/* Right Column: Equal-height Tabbed Panel */}
+        <div className="min-w-0 h-[520px] lg:h-auto flex flex-col">
+          <RoomSidebar
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            messages={messages}
+            participants={participants}
+            currentSocketId={socketId}
+            isHost={isHost}
+            chatInput={chatInput}
+            onChatInputChange={setChatInput}
+            onSendMessage={handleSendMessage}
+            onSendReaction={handleSendReaction}
+            onAssignRole={handleAssignRole}
+            onRemoveUser={handleRemoveUser}
+            chatBottomRef={chatBottomRef}
+          />
         </div>
       </main>
     </div>

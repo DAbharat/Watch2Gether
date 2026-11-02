@@ -149,7 +149,7 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
   }, [videoId, isReady]);
 
   return (
-    <div className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl border border-zinc-800">
+    <div className="relative w-full h-full bg-black overflow-hidden">
       <div ref={containerRef} className="w-full h-full" />
 
       {!canControl && (
@@ -161,9 +161,9 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
       )}
 
       {!isReady && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950 text-zinc-400 gap-3">
-          <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm font-medium">Connecting to YouTube...</p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-zinc-500 gap-2.5">
+          <div className="w-7 h-7 border-2 border-white/10 border-t-teal-400 rounded-full animate-spin" />
+          <p className="text-xs font-mono">Connecting to YouTube...</p>
         </div>
       )}
     </div>
