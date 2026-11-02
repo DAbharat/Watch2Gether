@@ -44,7 +44,7 @@ export function ChangeVideoSection({
         <button
           type="submit"
           disabled={!canControl || !newVideoUrl.trim()}
-          className="px-4 py-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs text-zinc-200 transition-colors"
+          className="px-4 py-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs text-zinc-200 transition-colors cursor-pointer"
         >
           Load
         </button>

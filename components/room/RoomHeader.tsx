@@ -30,7 +30,7 @@ export function RoomHeader({
       <div className="flex items-center gap-3">
         <button
           onClick={() => router.push('/')}
-          className="flex items-center gap-2 text-xs font-semibold text-zinc-300 hover:text-white transition-colors"
+          className="flex items-center gap-2 text-xs font-semibold text-zinc-300 hover:text-white transition-colors cursor-pointer"
         >
           <div className="w-5 h-5 rounded-md bg-white/[0.06] border border-white/10 flex items-center justify-center">
             <Play className="w-2.5 h-2.5 text-zinc-200 fill-zinc-200 ml-0.2" />
@@ -46,7 +46,7 @@ export function RoomHeader({
           <button
             onClick={onCopyRoomLink}
             title="Copy room link"
-            className="text-zinc-500 hover:text-zinc-200 transition-colors ml-0.5"
+            className="text-zinc-500 hover:text-zinc-200 transition-colors ml-0.5 cursor-pointer"
           >
             {copied ? (
               <Check className="w-3.5 h-3.5 text-teal-400" />
@@ -73,7 +73,7 @@ export function RoomHeader({
 
         <button
           onClick={onLeaveRoom}
-          className="p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors"
+          className="p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors cursor-pointer"
           title="Leave room"
         >
           <LogOut className="w-3.5 h-3.5" />

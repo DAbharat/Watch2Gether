@@ -292,9 +292,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const handleRemoveUser = (targetUserId: string) => {
     if (!isHost) return;
-    if (confirm('Are you sure you want to remove this participant?')) {
-      socket.emit('remove_participant', { roomId, userId: targetUserId });
-    }
+    socket.emit('remove_participant', { roomId, userId: targetUserId });
   };
 
   const handleSendMessage = (e: React.FormEvent) => {

@@ -50,7 +50,7 @@ export function VideoSection({
             disabled={!canControl}
             className={`px-3 py-1.5 rounded-lg font-semibold text-xs flex items-center gap-1.5 transition-all ${
               canControl
-                ? 'bg-teal-400 hover:bg-teal-300 text-black active:scale-95'
+                ? 'bg-teal-400 hover:bg-teal-300 text-black active:scale-95 cursor-pointer'
                 : 'bg-white/[0.04] text-zinc-600 cursor-not-allowed border border-white/[0.04]'
             }`}
           >
@@ -68,7 +68,7 @@ export function VideoSection({
             disabled={!canControl}
             className={`p-1.5 rounded-lg border border-transparent transition-colors ${
               canControl
-                ? 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.05] hover:border-white/[0.08]'
+                ? 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.05] hover:border-white/[0.08] cursor-pointer'
                 : 'text-zinc-600 cursor-not-allowed'
             }`}
             title="Rewind 10 seconds"
@@ -82,7 +82,7 @@ export function VideoSection({
             disabled={!canControl}
             className={`p-1.5 rounded-lg border border-transparent transition-colors ${
               canControl
-                ? 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.05] hover:border-white/[0.08]'
+                ? 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.05] hover:border-white/[0.08] cursor-pointer'
                 : 'text-zinc-600 cursor-not-allowed'
             }`}
             title="Forward 10 seconds"

@@ -22,6 +22,21 @@ body {
   overflow-x: hidden;
 }
 
+button,
+[role="button"],
+input[type="button"],
+input[type="submit"],
+input[type="reset"] {
+  cursor: pointer !important;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"],
+input[type="button"]:disabled,
+input[type="submit"]:disabled {
+  cursor: not-allowed !important;
+}
+
 /* Subtle glow utilities */
 .glow-teal {
   box-shadow: 0 0 35px -5px rgba(20, 184, 166, 0.25);
