@@ -11,9 +11,11 @@ import { AlertCircle } from 'lucide-react';
 
 import { RoomHeader } from '@/components/room/RoomHeader';
 import { VideoSection } from '@/components/room/VideoSection';
-import { ChangeVideoSection } from '@/components/room/ChangeVideoSection';
-import { RoomSidebar } from '@/components/room/RoomSidebar';
+import { ChatBox } from '@/components/room/ChatBox';
+import { ChangeVideoModal } from '@/components/room/ChangeVideoModal';
+import { ParticipantsModal } from '@/components/room/ParticipantsModal';
 import { FloatingReactions } from '@/components/room/FloatingReactions';
+import { resetParticipantOrder } from '@/lib/avatars';
 
 interface RoomClientProps {
   roomId: string;
@@ -40,9 +42,13 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const isModerator = userRole === 'moderator';
   const canControl = isHost || isModerator;
 
+  const hostParticipant = participants.find(
+    (p) => p.role === 'host' || p.socketId === hostSocketId
+  );
+  const [isChangeVideoOpen, setIsChangeVideoOpen] = useState<boolean>(false);
+  const [isParticipantsOpen, setIsParticipantsOpen] = useState<boolean>(false);
+
   const [copied, setCopied] = useState<boolean>(false);
-  const [newVideoUrl, setNewVideoUrl] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'chat' | 'participants'>('chat');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState<string>('');
   const [floatingReactions, setFloatingReactions] = useState<ReactionData[]>([]);
@@ -145,183 +151,118 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       });
     });
 
-    socket.on('user_joined', (data: any) => {
-      setParticipants(data.participants);
-      if (data.userId !== socket.id) {
-        toast.add({
-          title: 'Participant Joined',
-          description: `${data.username} entered the room.`,
-          type: 'info',
-        });
-      }
+    socket.on('participants_update', (updatedParticipants: ParticipantData[]) => {
+      setParticipants(updatedParticipants);
     });
 
-    socket.on('user_left', (data: any) => {
-      setParticipants(data.participants);
-      if (data.hostSocketId) setHostSocketId(data.hostSocketId);
-      toast.add({
-        title: 'Participant Left',
-        description: `${data.username} left the party.`,
-        type: 'info',
-      });
+    socket.on('chat_message', (msg: ChatMessage) => {
+      setMessages((prev) => [...prev, msg]);
+      setTimeout(() => {
+        chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
     });
 
-    socket.on('role_assigned', (data: any) => {
-      setParticipants(data.participants);
-      if (data.hostSocketId) setHostSocketId(data.hostSocketId);
+    socket.on('reaction', (reaction: ReactionData) => {
+      setFloatingReactions((prev) => [...prev, reaction]);
+      setTimeout(() => {
+        setFloatingReactions((prev) => prev.filter((r) => r.id !== reaction.id));
+      }, 3500);
+    });
 
-      if (data.userId === socket.id) {
+    socket.on('role_changed', ({ socketId: changedId, newRole }: { socketId: string; newRole: Role }) => {
+      setParticipants((prev) =>
+        prev.map((p) => (p.socketId === changedId ? { ...p, role: newRole } : p))
+      );
+      if (changedId === socketId) {
+        const label = newRole === 'moderator' ? 'Moderator' : 'Participant';
         toast.add({
           title: 'Role Updated',
-          description: `You are now a ${data.role}!`,
-          type: 'success',
-        });
-      } else {
-        toast.add({
-          title: 'Role Changed',
-          description: `${data.username} is now a ${data.role}.`,
+          description: `You are now a ${label}.`,
           type: 'info',
         });
       }
     });
 
-    socket.on('participant_removed', (data: any) => {
-      setParticipants(data.participants);
-    });
-
-    socket.on('kicked', () => {
-      setKickedMessage('You have been removed from the room by the host.');
-      toast.add({
-        title: 'Removed from Room',
-        description: 'The host removed you from this watch party.',
-        type: 'error',
-      });
-    });
-
-    socket.on('error_message', (data: { message: string }) => {
-      toast.add({
-        title: 'Action Not Permitted',
-        description: data.message,
-        type: 'error',
-      });
-    });
-
-    socket.on('new_message', (msg: ChatMessage) => {
-      setMessages((prev) => [...prev, msg]);
-    });
-
-    socket.on('new_reaction', (reaction: { emoji: string; username: string }) => {
-      const id = Math.random().toString(36).substring(2, 9);
-      setFloatingReactions((prev) => [
-        ...prev,
-        { id, emoji: reaction.emoji, username: reaction.username },
-      ]);
-      setTimeout(() => {
-        setFloatingReactions((prev) => prev.filter((r) => r.id !== id));
-      }, 2500);
+    socket.on('kicked', ({ message }: { message: string }) => {
+      setKickedMessage(message || 'You have been removed from the room.');
+      socket.disconnect();
     });
 
     return () => {
-      socket.off('connect');
-      socket.off('disconnect');
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
       socket.off('sync_state');
       socket.off('play');
       socket.off('pause');
       socket.off('seek');
       socket.off('change_video');
-      socket.off('user_joined');
-      socket.off('user_left');
-      socket.off('role_assigned');
-      socket.off('participant_removed');
+      socket.off('participants_update');
+      socket.off('chat_message');
+      socket.off('reaction');
+      socket.off('role_changed');
       socket.off('kicked');
-      socket.off('error_message');
-      socket.off('new_message');
-      socket.off('new_reaction');
-      socket.emit('leave_room');
     };
   }, [roomId]);
 
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
   const handleTogglePlay = () => {
-    if (!canControl) return;
-    const currentTime = playerRef.current?.getCurrentTime() || 0;
+    if (!canControl || !playerRef.current) return;
+    const currentTime = playerRef.current.getCurrentTime();
     if (isPlaying) {
       setIsPlaying(false);
-      playerRef.current?.pauseVideo();
+      playerRef.current.pauseVideo();
       socket.emit('pause', { roomId, currentTime });
     } else {
       setIsPlaying(true);
-      playerRef.current?.playVideo();
+      playerRef.current.playVideo();
       socket.emit('play', { roomId, currentTime });
     }
   };
 
-  const handleSeekOffset = (seconds: number) => {
-    if (!canControl) return;
-    const current = playerRef.current?.getCurrentTime() || 0;
-    const newTime = Math.max(0, current + seconds);
-    playerRef.current?.seekTo(newTime);
-    socket.emit('seek', { roomId, time: newTime });
-  };
-
-  const handleChangeVideo = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!canControl) return;
-
-    const extractedId = extractYouTubeId(newVideoUrl);
-    if (!extractedId) {
+  const handleChangeVideo = (url: string) => {
+    const newVideoId = extractYouTubeId(url);
+    if (!newVideoId) {
       toast.add({
-        title: 'Invalid Video URL',
-        description: 'Please paste a valid YouTube video link or 11-character video ID.',
+        title: 'Invalid URL',
+        description: 'Please enter a valid YouTube URL.',
         type: 'error',
       });
       return;
     }
-
-    socket.emit('change_video', { roomId, videoId: extractedId });
-    setNewVideoUrl('');
-  };
-
-  const handleAssignRole = (targetUserId: string, newRole: Role) => {
-    if (!isHost) return;
-    socket.emit('assign_role', { roomId, userId: targetUserId, role: newRole });
-  };
-
-  const handleRemoveUser = (targetUserId: string) => {
-    if (!isHost) return;
-    socket.emit('remove_participant', { roomId, userId: targetUserId });
+    socket.emit('change_video', { roomId, videoId: newVideoId });
+    setIsChangeVideoOpen(false);
   };
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
-    socket.emit('send_message', { roomId, text: chatInput.trim() });
+    socket.emit('chat_message', { roomId, text: chatInput.trim() });
     setChatInput('');
   };
 
   const handleSendReaction = (emoji: string) => {
-    socket.emit('send_reaction', { roomId, emoji });
+    socket.emit('reaction', { roomId, emoji });
   };
 
   const copyRoomLink = () => {
-    const url = typeof window !== 'undefined' ? window.location.href : '';
-    navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-    toast.add({
-      title: 'Invite Link Copied',
-      description: 'Room URL copied to your clipboard.',
-      type: 'success',
+    const link = `${window.location.origin}/room/${roomId}`;
+    navigator.clipboard.writeText(link).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     });
+  };
+
+  const handleAssignRole = (targetSocketId: string, newRole: Role) => {
+    socket.emit('assign_role', { roomId, targetSocketId, newRole });
+  };
+
+  const handleRemoveUser = (targetSocketId: string) => {
+    socket.emit('kick_user', { roomId, targetSocketId });
   };
 
   if (kickedMessage) {
     return (
-      <div className="min-h-screen bg-[#05090a] flex flex-col items-center justify-center p-6 text-center text-zinc-100">
-        <div className="w-12 h-12 rounded-full bg-white/[0.04] border border-white/[0.08] text-zinc-400 flex items-center justify-center mb-4">
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#0b0c0f] text-zinc-100">
+        <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 mb-4">
           <AlertCircle className="w-6 h-6" />
         </div>
         <h1 className="text-xl font-bold mb-2 text-zinc-200">Removed from Room</h1>
@@ -337,38 +278,30 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[#05090a] text-zinc-100 flex flex-col justify-between selection:bg-teal-400 selection:text-black">
-      {/* Background radial glow */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div
-          className="absolute -top-24 left-1/2 -translate-x-1/2 w-[75vw] max-w-[1200px] h-[450px] blur-[60px] pointer-events-none"
-          style={{
-            background:
-              'radial-gradient(ellipse 75% 450px at 50% 0%, rgba(20, 90, 80, 0.32) 0%, rgba(15, 61, 56, 0.18) 35%, rgba(5, 20, 18, 0.06) 65%, transparent 80%)',
-          }}
-        />
-      </div>
-
-      {/* Floating Reactions Overlay */}
+    <div className="h-screen w-screen max-h-screen overflow-hidden bg-[#121316] text-zinc-100 flex flex-col select-none">
       <FloatingReactions reactions={floatingReactions} />
 
-      {/* Slim, Low-contrast Header */}
+      {/* Top Header Row with LHS expanding 'Add New Video' input */}
       <RoomHeader
         roomId={roomId}
+        hostParticipant={hostParticipant}
+        participants={participants}
         isConnected={isConnected}
-        userRole={userRole}
+        canControl={canControl}
         copied={copied}
         onCopyRoomLink={copyRoomLink}
+        onSubmitUrl={handleChangeVideo}
         onLeaveRoom={() => router.push('/')}
       />
 
-      {/* Main Area: Two-column grid (~70% / 30%) with Equal Height columns */}
-      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-[1fr_360px] xl:grid-cols-[1fr_390px] gap-6 items-stretch">
-        {/* Left Column: Video + Attached Control Bar + Compact Change Video Row */}
-        <div className="flex flex-col gap-3 min-w-0">
+      {/* Main Content Area: Left Video Section + Right Chat Sidebar */}
+      <div className="flex-1 min-h-0 w-full flex flex-row overflow-hidden">
+        {/* Left Column: Video Area */}
+        <div className="flex-1 min-w-0 flex flex-col justify-between p-4 sm:p-5 overflow-hidden">
           <VideoSection
             playerRef={playerRef}
             videoId={videoId}
+            participantCount={participants.length}
             isPlaying={isPlaying}
             canControl={canControl}
             onLocalPlay={(time) => {
@@ -383,36 +316,35 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               socket.emit('seek', { roomId, time });
             }}
             onTogglePlay={handleTogglePlay}
-            onSeekOffset={handleSeekOffset}
-          />
-
-          <ChangeVideoSection
-            newVideoUrl={newVideoUrl}
-            onVideoUrlChange={setNewVideoUrl}
-            onSubmit={handleChangeVideo}
-            canControl={canControl}
           />
         </div>
 
-        {/* Right Column: Equal-height Tabbed Panel */}
-        <div className="min-w-0 h-[520px] lg:h-auto flex flex-col">
-          <RoomSidebar
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
+        {/* Right Column: Chat Sidebar */}
+        <div className="w-[280px] sm:w-[320px] xl:w-[360px] shrink-0 h-full min-h-0 flex flex-col border-l border-white/[0.06]">
+          <ChatBox
             messages={messages}
             participants={participants}
             currentSocketId={socketId}
-            isHost={isHost}
             chatInput={chatInput}
             onChatInputChange={setChatInput}
             onSendMessage={handleSendMessage}
             onSendReaction={handleSendReaction}
-            onAssignRole={handleAssignRole}
-            onRemoveUser={handleRemoveUser}
+            onOpenParticipants={() => setIsParticipantsOpen(true)}
             chatBottomRef={chatBottomRef}
           />
         </div>
-      </main>
+      </div>
+
+      {/* Modal: Room Participants Roster & Moderation */}
+      <ParticipantsModal
+        isOpen={isParticipantsOpen}
+        onClose={() => setIsParticipantsOpen(false)}
+        participants={participants}
+        currentSocketId={socketId}
+        isHost={isHost}
+        onAssignRole={handleAssignRole}
+        onRemoveUser={handleRemoveUser}
+      />
     </div>
   );
 }

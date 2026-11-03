@@ -15,6 +15,14 @@ export interface YouTubePlayerRef {
   seekTo: (seconds: number) => void;
   loadVideo: (videoId: string) => void;
   getCurrentTime: () => number;
+  getDuration: () => number;
+  isMuted: () => boolean;
+  mute: () => void;
+  unMute: () => void;
+  getVolume: () => number;
+  setVolume: (volume: number) => void;
+  setPlaybackRate: (rate: number) => void;
+  getPlaybackRate: () => number;
 }
 
 interface YouTubePlayerProps {
@@ -64,6 +72,30 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
     },
     getCurrentTime: () => {
       return playerRef.current?.getCurrentTime ? playerRef.current.getCurrentTime() : 0;
+    },
+    getDuration: () => {
+      return playerRef.current?.getDuration ? playerRef.current.getDuration() : 0;
+    },
+    isMuted: () => {
+      return playerRef.current?.isMuted ? playerRef.current.isMuted() : false;
+    },
+    mute: () => {
+      if (playerRef.current?.mute) playerRef.current.mute();
+    },
+    unMute: () => {
+      if (playerRef.current?.unMute) playerRef.current.unMute();
+    },
+    getVolume: () => {
+      return playerRef.current?.getVolume ? playerRef.current.getVolume() : 100;
+    },
+    setVolume: (vol: number) => {
+      if (playerRef.current?.setVolume) playerRef.current.setVolume(vol);
+    },
+    setPlaybackRate: (rate: number) => {
+      if (playerRef.current?.setPlaybackRate) playerRef.current.setPlaybackRate(rate);
+    },
+    getPlaybackRate: () => {
+      return playerRef.current?.getPlaybackRate ? playerRef.current.getPlaybackRate() : 1;
     }
   }));
 
@@ -87,7 +119,7 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
         height: '100%',
         playerVars: {
           autoplay: 0,
-          controls: canControl ? 1 : 0,
+          controls: 0,
           modestbranding: 1,
           rel: 0,
           origin: typeof window !== 'undefined' ? window.location.origin : '',
@@ -149,7 +181,7 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
   }, [videoId, isReady]);
 
   return (
-    <div className="relative w-full h-full bg-black overflow-hidden">
+    <div className="relative w-full h-full bg-black overflow-hidden rounded-2xl">
       <div ref={containerRef} className="w-full h-full" />
 
       {!canControl && (
