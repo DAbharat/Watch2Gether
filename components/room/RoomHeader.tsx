@@ -1,14 +1,14 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import { Copy, Check, LogOut, Video, X } from 'lucide-react';
+import React from 'react';
+import { Play, Link2, Users, LogOut, Check, Home } from 'lucide-react';
 import { ParticipantData } from '@/lib/types';
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { getAvatarForUser } from '@/lib/avatars';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
 interface RoomHeaderProps {
   roomId: string;
   hostParticipant?: ParticipantData;
+  currentUser?: ParticipantData;
   participants: ParticipantData[];
   isConnected: boolean;
   canControl: boolean;
@@ -21,136 +21,107 @@ interface RoomHeaderProps {
 export function RoomHeader({
   roomId,
   hostParticipant,
+  currentUser,
   participants,
-  isConnected,
-  canControl,
   copied,
   onCopyRoomLink,
-  onSubmitUrl,
   onLeaveRoom,
 }: RoomHeaderProps) {
   const hostName = hostParticipant?.username || 'Host';
-  const hostAvatar = getAvatarForUser(hostParticipant, participants);
-
-  const [isInputOpen, setIsInputOpen] = useState(false);
-  const [urlInput, setUrlInput] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const handleToggleOrSubmit = () => {
-    if (!isInputOpen) {
-      setIsInputOpen(true);
-      setTimeout(() => inputRef.current?.focus(), 150);
-      return;
-    }
-
-    if (urlInput.trim()) {
-      onSubmitUrl(urlInput.trim());
-      setUrlInput('');
-      setIsInputOpen(false);
-    } else {
-      setIsInputOpen(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleToggleOrSubmit();
-    } else if (e.key === 'Escape') {
-      setIsInputOpen(false);
-      setUrlInput('');
-    }
-  };
+  const currentUserName = currentUser?.username || 'You';
 
   return (
-    <header className="w-full flex items-center justify-between px-4 sm:px-6 py-3 border-b border-white/[0.06] shrink-0 bg-[#121316]">
-      {/* Left: Avatar + Host Name + 'Host' subtitle */}
-      <div className="flex items-center gap-3 min-w-0">
-        <Avatar size="lg" className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border border-white/10 shadow shrink-0">
-          <AvatarImage src={hostAvatar} alt={hostName} className="object-cover" />
-          <AvatarFallback className="bg-teal-500/20 text-teal-300 font-bold text-sm">
-            {hostName.charAt(0).toUpperCase()}
-          </AvatarFallback>
-        </Avatar>
+    <div className="w-full shrink-0 flex flex-col">
+      {/* 1. Top Navigation Bar: Watch2Gether logo on left, Home + Avatar on right */}
+      <div className="w-full flex items-center justify-between pb-3 px-1 shrink-0">
+        {/* <div className="flex items-center gap-2">
+          <span className="font-extrabold text-base sm:text-lg tracking-tight text-white drop-shadow-md">
+            Watch2Gether
+          </span>
+        </div> */}
 
-        <div className="flex flex-col min-w-0">
-          <span className="text-sm font-bold text-zinc-100 truncate leading-tight">
-            {hostName}
-          </span>
-          <span className="text-[11px] text-zinc-400 font-medium leading-tight">
-            Host
-          </span>
+        <div className="flex items-center gap-3">
+          {/* Home button */}
+          {/* <button
+            onClick={onLeaveRoom}
+            title="Go to Home"
+            className="glass-white-pill flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold text-white shadow-sm transition-all cursor-pointer"
+          >
+            <Home className="w-3.5 h-3.5 text-white" />
+            <span>Home</span>
+          </button> */}
+
+          {/* Current User Avatar circle */}
+          {/* <Avatar size="sm" className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-white/30 shadow">
+            <AvatarFallback className="bg-gradient-to-tr from-purple-500 to-pink-500 text-white font-bold text-xs">
+              {currentUserName.charAt(0).toUpperCase()}
+            </AvatarFallback>
+          </Avatar> */}
         </div>
       </div>
 
-      {/* Right: Add New Video with LHS expanding input + Room Code + Leave Button */}
-      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-        {/* Room Code Badge & Copy */}
-        <button
-          onClick={onCopyRoomLink}
-          title="Copy room invite link"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-white/10 hover:border-white/20 hover:bg-white/[0.04] text-xs font-medium text-zinc-300 transition-all cursor-pointer"
-        >
-          <span className="text-zinc-500 text-[10px] font-semibold uppercase tracking-wider">Room:</span>
-          <span className="font-mono text-zinc-200">{roomId}</span>
-          {copied ? (
-            <Check className="w-3.5 h-3.5 text-teal-400" />
-          ) : (
-            <Copy className="w-3.5 h-3.5 text-zinc-400" />
-          )}
-        </button>
+      {/* 2. Room Banner Card: Play Gradient Icon + Party Title + Invite + Leave */}
+      <div className="w-full glass-white-card rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 flex items-center justify-between gap-4 shadow-xl mb-3.5 shrink-0">
+        {/* Left: Play Gradient Icon + Title + Meta */}
+        <div className="flex items-center gap-3 sm:gap-3.5 min-w-0">
+          {/* Magenta / Pink Play Gradient Square matching screenshot */}
+          {/* <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-fuchsia-600 via-pink-600 to-[#F05A65] flex items-center justify-center shadow-lg shadow-pink-500/25 shrink-0">
+            <Play className="w-5 h-5 fill-white text-white ml-0.5" />
+          </div> */}
 
-        {/* Add New Video with LHS expanding input */}
-        <div className="flex items-center">
-          {/* LHS Expanding Input Box */}
-          <div
-            className={`overflow-hidden transition-all duration-300 ease-out flex items-center ${
-              isInputOpen ? 'w-60 sm:w-72 opacity-100 mr-2' : 'w-0 opacity-0 pointer-events-none'
-            }`}
-          >
-            <div className="relative w-full flex items-center">
-              <input
-                ref={inputRef}
-                type="text"
-                value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Paste YouTube video URL..."
-                className="w-full bg-[#1b1c22] border border-teal-500/50 focus:border-teal-400 rounded-xl px-3 py-1.5 text-xs text-zinc-100 placeholder-zinc-500 outline-none pr-7 shadow-lg"
-              />
-              {urlInput && (
-                <button
-                  type="button"
-                  onClick={() => setUrlInput('')}
-                  className="absolute right-2 text-zinc-400 hover:text-zinc-200"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
+          <div className="flex flex-col min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm sm:text-base font-bold text-white tracking-tight truncate leading-snug">
+                {hostName}&apos;s Watch Party
+              </h1>
+              <button
+                onClick={onCopyRoomLink}
+                title="Copy room link"
+                className="text-white/70 hover:text-white transition-colors cursor-pointer p-0.5"
+              >
+                {copied ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <Link2 className="w-3.5 h-3.5" />
+                )}
+              </button>
             </div>
-          </div>
 
-          {/* Add New Video Button (Teal accent, NO yellow) */}
+            <p className="text-[11px] sm:text-xs text-white/80 font-normal leading-tight mt-0.5">
+              Room: {roomId} &bull; {participants.length}{' '}
+              {participants.length === 1 ? 'member' : 'members'}
+            </p>
+          </div>
+        </div>
+
+        {/* Right: Invite Friends & Leave Room matching screenshot */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Invite Friends Button */}
           <button
-            type="button"
-            onClick={handleToggleOrSubmit}
-            className="px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold bg-gradient-to-r from-teal-400 to-emerald-400 hover:brightness-110 active:scale-95 text-black shadow-md shadow-teal-500/20 transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
-            title={isInputOpen && urlInput.trim() ? 'Load video' : 'Add new video'}
+            onClick={onCopyRoomLink}
+            title="Invite friends"
+            className="glass-white-pill flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full text-xs font-semibold text-white shadow-md transition-all cursor-pointer"
           >
-            <Video className="w-3.5 h-3.5 fill-black text-black" />
-            <span>{isInputOpen && urlInput.trim() ? 'Add' : 'Add New Video'}</span>
+            {copied ? (
+              <Check className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <Users className="w-3.5 h-3.5 text-white" />
+            )}
+            <span className="hidden sm:inline">{copied ? 'Link Copied!' : 'Invite Friends'}</span>
+            <span className="sm:hidden">{copied ? 'Copied' : 'Invite'}</span>
+          </button>
+
+          {/* Leave Room Button matching screenshot (Coral color) */}
+          <button
+            onClick={onLeaveRoom}
+            title="Leave room"
+            className="flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full bg-[#F05A65] hover:bg-[#FF7180] text-xs font-bold text-white shadow-lg shadow-red-500/20 active:scale-95 transition-all cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5 text-white" />
+            <span>Leave Room</span>
           </button>
         </div>
-
-        {/* Leave Room Button */}
-        <button
-          onClick={onLeaveRoom}
-          title="Leave Watch Party"
-          className="p-1.5 sm:p-2 rounded-xl border border-white/10 hover:border-rose-500/30 hover:bg-rose-500/10 text-zinc-400 hover:text-rose-400 transition-all cursor-pointer"
-        >
-          <LogOut className="w-4 h-4" />
-        </button>
       </div>
-    </header>
+    </div>
   );
 }

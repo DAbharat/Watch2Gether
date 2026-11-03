@@ -71,13 +71,17 @@ export function RoleBadge({
 }: RoleBadgeProps) {
   const config = ROLE_CONFIG[role] || ROLE_CONFIG.participant;
   const isHost = role === 'host';
+  const isMod = role === 'moderator';
+
   const roleStyle = isHost
-    ? 'text-zinc-200 border-white/15 bg-white/[0.04]'
-    : 'text-zinc-400 border-white/[0.07] bg-white/[0.02]';
+    ? 'text-white border-white/25 bg-white/[0.10] shadow-sm font-semibold'
+    : isMod
+    ? 'text-blue-300 border-blue-500/30 bg-blue-500/15 font-semibold'
+    : 'text-white/80 border-white/15 bg-white/[0.05] font-medium';
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${roleStyle} ${className}`}
+      className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] border backdrop-blur-md ${roleStyle} ${className}`}
     >
       <RoleIcon role={role} className={iconClassName} size={size} strokeWidth={strokeWidth} />
       <span>{short ? config.shortLabel : config.label}</span>

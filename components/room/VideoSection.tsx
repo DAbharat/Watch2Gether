@@ -1,46 +1,78 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
+import { Maximize2 } from 'lucide-react';
 import { YouTubePlayer, YouTubePlayerRef } from '@/components/YouTubePlayer';
-import { VideoTitleBar } from '@/components/room/VideoTitleBar';
 import { VideoPlayerControls } from '@/components/room/VideoPlayerControls';
 
 interface VideoSectionProps {
   playerRef: React.RefObject<YouTubePlayerRef | null>;
   videoId: string;
-  participantCount: number;
   isPlaying: boolean;
   canControl: boolean;
   onLocalPlay: (time: number) => void;
   onLocalPause: (time: number) => void;
   onLocalSeek: (time: number) => void;
   onTogglePlay: () => void;
+  onOpenChangeVideo?: () => void;
 }
 
 export function VideoSection({
   playerRef,
   videoId,
-  participantCount,
   isPlaying,
   canControl,
   onLocalPlay,
   onLocalPause,
   onLocalSeek,
   onTogglePlay,
+  onOpenChangeVideo,
 }: VideoSectionProps) {
   const videoContainerRef = useRef<HTMLDivElement>(null);
+  const [videoWidth, setVideoWidth] = useState<number | null>(null);
+
+  useEffect(() => {
+    const el = videoContainerRef.current;
+    if (!el) return;
+
+    const updateWidth = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0) {
+        setVideoWidth(Math.round(rect.width));
+      }
+    };
+
+    updateWidth();
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0) {
+          setVideoWidth(Math.round(entry.contentRect.width));
+        }
+      }
+    });
+
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const elementStyle: React.CSSProperties | undefined = videoWidth
+    ? { width: `${videoWidth}px`, maxWidth: '100%' }
+    : undefined;
 
   return (
-    <div className="w-full h-full flex flex-col justify-between min-h-0 min-w-0">
-      {/* 1. Title Bar: YouTube Video Title on left, Viewers count on right */}
-      <VideoTitleBar videoId={videoId} participantCount={participantCount} />
-
-      {/* 2. Middle: YouTube Video - 16:9 aspect ratio, strictly constrained to viewport height */}
+    <div className="w-full h-full flex flex-col items-center justify-between min-h-0 min-w-0">
+      {/* 1. YouTube Video Container matching screenshot */}
       <div className="flex-1 min-h-0 w-full flex items-center justify-center overflow-hidden">
         <div
           ref={videoContainerRef}
-          className="w-full h-full aspect-video max-h-full max-w-full rounded-2xl overflow-hidden bg-black shadow-2xl relative flex items-center justify-center border border-white/[0.08]"
+          className="w-full h-full aspect-video max-h-full max-w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black/95 shadow-2xl relative flex items-center justify-center border border-white/20"
         >
+          {/* Subtle expand icon in top-right matching screenshot */}
+          <div className="absolute top-3.5 right-3.5 z-20 pointer-events-none text-white/60">
+            <Maximize2 className="w-4 h-4" />
+          </div>
+
           <YouTubePlayer
             ref={playerRef}
             videoId={videoId}
@@ -52,7 +84,7 @@ export function VideoSection({
         </div>
       </div>
 
-      {/* 3. Bottom: Controls Bar directly below video with Play/Pause and duration */}
+      {/* 2. Controls Bar directly below video with Play/Pause, Duration, Progress Bar, and Room Settings */}
       <VideoPlayerControls
         playerRef={playerRef}
         videoContainerRef={videoContainerRef}
@@ -60,6 +92,8 @@ export function VideoSection({
         canControl={canControl}
         onTogglePlay={onTogglePlay}
         onSeek={onLocalSeek}
+        onOpenChangeVideo={onOpenChangeVideo}
+        style={elementStyle}
       />
     </div>
   );

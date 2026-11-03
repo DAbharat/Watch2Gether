@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Volume2, VolumeX, Settings, Maximize, Minimize } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Settings, Maximize, Minimize, Sliders } from 'lucide-react';
 import { YouTubePlayerRef } from '@/components/YouTubePlayer';
 
 interface VideoPlayerControlsProps {
@@ -11,6 +11,9 @@ interface VideoPlayerControlsProps {
   canControl: boolean;
   onTogglePlay: () => void;
   onSeek: (seconds: number) => void;
+  onOpenChangeVideo?: () => void;
+  style?: React.CSSProperties;
+  className?: string;
 }
 
 function formatDuration(sec: number): string {
@@ -35,6 +38,9 @@ export function VideoPlayerControls({
   canControl,
   onTogglePlay,
   onSeek,
+  onOpenChangeVideo,
+  style,
+  className = '',
 }: VideoPlayerControlsProps) {
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
@@ -102,62 +108,65 @@ export function VideoPlayerControls({
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="w-full flex items-center justify-between gap-3 sm:gap-4 mt-2 select-none shrink-0 px-0.5">
-      {/* Left: Play / Pause Button */}
-      <button
-        onClick={onTogglePlay}
-        disabled={!canControl}
-        className="text-zinc-200 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0 p-1"
-        title={canControl ? (isPlaying ? 'Pause' : 'Play') : 'Only Host/Mod can control playback'}
-      >
-        {isPlaying ? (
-          <Pause className="w-4 h-4 fill-current" />
-        ) : (
-          <Play className="w-4 h-4 fill-current ml-0.5" />
-        )}
-      </button>
-
-      {/* Middle: Seekable Teal Progress Bar + Time Text */}
+    <div
+      style={style}
+      className={`w-full glass-white-card rounded-2xl p-2.5 sm:p-3 shadow-xl flex items-center justify-between gap-3 sm:gap-4 mt-3 select-none shrink-0 ${className}`}
+    >
+      {/* Left: Play/Pause, Progress, Time, Volume, Speed, Fullscreen */}
       <div className="flex-1 flex items-center gap-3 sm:gap-4 min-w-0">
-        <div
-          ref={progressBarRef}
-          onClick={handleProgressClick}
-          className={`relative h-1.5 flex-1 bg-zinc-700/60 rounded-full overflow-hidden ${
-            canControl ? 'cursor-pointer group' : 'cursor-default'
-          }`}
-          title={canControl ? 'Seek video' : ''}
+        {/* Play / Pause button */}
+        <button
+          onClick={onTogglePlay}
+          disabled={!canControl}
+          className="text-white hover:scale-110 active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0 p-1"
+          title={canControl ? (isPlaying ? 'Pause' : 'Play') : 'Only Host/Mod can control playback'}
         >
-          {/* Teal progress bar fill (Strictly NO yellow) */}
-          <div
-            className="absolute top-0 bottom-0 left-0 bg-gradient-to-r from-teal-400 to-emerald-400 rounded-full transition-all duration-150 shadow-[0_0_8px_rgba(45,212,191,0.5)]"
-            style={{ width: `${Math.min(100, progressPercent)}%` }}
-          />
-        </div>
+          {isPlaying ? (
+            <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-white text-white" />
+          ) : (
+            <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-white text-white ml-0.5" />
+          )}
+        </button>
 
-        {/* Timestamp format: 02:07 / 1:30:45 */}
-        <span className="text-[11px] sm:text-xs font-mono tracking-tight shrink-0 tabular-nums">
-          <span className="text-teal-400 font-semibold">{formatDuration(currentTime)}</span>
-          <span className="text-zinc-500 mx-1">/</span>
-          <span className="text-zinc-400">{formatDuration(duration)}</span>
-        </span>
-      </div>
-
-      {/* Right: The 3 Buttons (Volume, Settings, Fullscreen) */}
-      <div className="flex items-center gap-3 shrink-0 text-zinc-400">
-        {/* 1. Volume / Mute button */}
+        {/* Volume / Mute button */}
         <button
           onClick={toggleMute}
-          className="hover:text-zinc-100 transition-colors cursor-pointer p-0.5"
+          className="text-white/80 hover:text-white transition-colors cursor-pointer p-0.5 shrink-0"
           title={isMuted ? 'Unmute' : 'Mute'}
         >
           {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
         </button>
 
-        {/* 2. Settings button */}
+        {/* Seekable Progress Bar */}
+        <div
+          ref={progressBarRef}
+          onClick={handleProgressClick}
+          className={`relative h-1.5 flex-1 bg-white/25 hover:h-2 rounded-full overflow-hidden transition-all ${
+            canControl ? 'cursor-pointer group' : 'cursor-default'
+          }`}
+          title={canControl ? 'Seek video' : ''}
+        >
+          <div
+            className="absolute top-0 bottom-0 left-0 bg-[#F05A65] rounded-full transition-all duration-150 shadow-[0_0_8px_rgba(240,90,101,0.6)]"
+            style={{ width: `${Math.min(100, progressPercent)}%` }}
+          />
+        </div>
+
+        {/* Duration timestamp: 12:34 / 22:17 */}
+        <span className="text-[11px] sm:text-xs font-mono font-medium text-white shrink-0 tabular-nums">
+          <span className="text-white font-bold">{formatDuration(currentTime)}</span>
+          <span className="text-white/50 mx-1">/</span>
+          <span className="text-white/80">{formatDuration(duration)}</span>
+        </span>
+      </div>
+
+      {/* Right: Settings, Fullscreen, and Room Settings button */}
+      <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+        {/* Settings button */}
         <div className="relative">
           <button
             onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-            className="hover:text-zinc-100 transition-colors cursor-pointer p-0.5"
+            className="text-white/80 hover:text-white transition-colors cursor-pointer p-1"
             title="Video settings"
           >
             <Settings className="w-4 h-4" />
@@ -169,8 +178,8 @@ export function VideoPlayerControls({
                 className="fixed inset-0 z-30"
                 onClick={() => setIsSettingsOpen(false)}
               />
-              <div className="absolute right-0 bottom-full mb-2 z-40 w-36 rounded-xl bg-[#1a1b22] border border-white/10 p-2 shadow-2xl backdrop-blur-xl animate-in zoom-in-95 duration-100 text-xs">
-                <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider px-2 py-1">
+              <div className="absolute right-0 bottom-full mb-2 z-40 w-36 rounded-2xl bg-black/85 border border-white/20 p-2 shadow-2xl backdrop-blur-2xl animate-in zoom-in-95 duration-100 text-xs">
+                <p className="text-[10px] font-bold text-white/50 uppercase tracking-wider px-2 py-1">
                   Speed
                 </p>
                 {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
@@ -183,8 +192,8 @@ export function VideoPlayerControls({
                     }}
                     className={`w-full text-left px-2 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center justify-between ${
                       playbackRate === speed
-                        ? 'bg-teal-500/20 text-teal-300 font-semibold'
-                        : 'text-zinc-300 hover:bg-white/[0.05]'
+                        ? 'bg-[#F05A65]/30 text-white font-bold'
+                        : 'text-white/80 hover:bg-white/[0.08]'
                     }`}
                   >
                     <span>{speed}x</span>
@@ -196,18 +205,26 @@ export function VideoPlayerControls({
           )}
         </div>
 
-        {/* 3. Fullscreen button */}
+        {/* Fullscreen button */}
         <button
           onClick={toggleFullscreen}
-          className="hover:text-zinc-100 transition-colors cursor-pointer p-0.5"
+          className="text-white/80 hover:text-white transition-colors cursor-pointer p-1"
           title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
         >
-          {isFullscreen ? (
-            <Minimize className="w-4 h-4" />
-          ) : (
-            <Maximize className="w-4 h-4" />
-          )}
+          {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
         </button>
+
+        {/* Room Settings / Add Video button matching screenshot */}
+        {onOpenChangeVideo && (
+          <button
+            onClick={onOpenChangeVideo}
+            title="Room settings & video URL"
+            className="glass-white-pill flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white transition-all cursor-pointer shadow-sm"
+          >
+            <Sliders className="w-3.5 h-3.5 text-white" />
+            <span className="hidden sm:inline">Room Settings</span>
+          </button>
+        )}
       </div>
     </div>
   );

@@ -6,9 +6,16 @@ import { Eye } from 'lucide-react';
 interface VideoTitleBarProps {
   videoId: string;
   participantCount: number;
+  style?: React.CSSProperties;
+  className?: string;
 }
 
-export function VideoTitleBar({ videoId, participantCount }: VideoTitleBarProps) {
+export function VideoTitleBar({
+  videoId,
+  participantCount,
+  style,
+  className = '',
+}: VideoTitleBarProps) {
   const [videoTitle, setVideoTitle] = useState<string>('Loading video...');
 
   useEffect(() => {
@@ -41,21 +48,24 @@ export function VideoTitleBar({ videoId, participantCount }: VideoTitleBarProps)
   }, [videoId]);
 
   return (
-    <div className="w-full bg-[#1e1f25] border border-white/[0.04] rounded-xl px-4 py-2.5 flex items-center justify-between gap-4 mb-3 shrink-0 shadow-sm">
+    <div
+      style={style}
+      className={`w-full card-cinema rounded-2xl px-4 sm:px-5 py-2.5 flex items-center justify-between gap-4 mb-2.5 shrink-0 shadow-lg ${className}`}
+    >
       {/* Video Title on Left */}
       <h2
-        className="text-xs sm:text-sm font-medium text-zinc-200 truncate min-w-0 flex-1 tracking-tight"
+        className="text-xs sm:text-sm font-bold text-white truncate min-w-0 flex-1 tracking-tight"
         title={videoTitle}
       >
         {videoTitle}
       </h2>
 
-      {/* Participants as Viewer count on Right */}
-      <div className="flex items-center gap-2 text-xs text-zinc-400 shrink-0">
-        <span className="font-medium text-zinc-400">
+      {/* Participants as Viewer count on Right (matching landing page pill badge) */}
+      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/[0.08] border border-white/15 text-xs font-semibold text-white/90 shrink-0 backdrop-blur-md">
+        <span>
           {participantCount} {participantCount === 1 ? 'Viewer' : 'Viewers'}
         </span>
-        <Eye className="w-4 h-4 text-zinc-400 stroke-[1.75]" />
+        <Eye className="w-3.5 h-3.5 text-blue-400 stroke-[2]" />
       </div>
     </div>
   );

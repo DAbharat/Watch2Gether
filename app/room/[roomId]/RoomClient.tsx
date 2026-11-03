@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { getSocket } from '@/lib/socket';
 import { YouTubePlayerRef } from '@/components/YouTubePlayer';
@@ -11,6 +12,7 @@ import { AlertCircle } from 'lucide-react';
 
 import { RoomHeader } from '@/components/room/RoomHeader';
 import { VideoSection } from '@/components/room/VideoSection';
+import { ParticipantsCard } from '@/components/room/ParticipantsCard';
 import { ChatBox } from '@/components/room/ChatBox';
 import { ChangeVideoModal } from '@/components/room/ChangeVideoModal';
 import { ParticipantsModal } from '@/components/room/ParticipantsModal';
@@ -278,62 +280,94 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   }
 
   return (
-    <div className="h-screen w-screen max-h-screen overflow-hidden bg-[#121316] text-zinc-100 flex flex-col select-none">
+    <div className="h-screen w-screen max-h-screen overflow-hidden text-white flex flex-col justify-center items-center p-3 sm:p-5 lg:p-7 relative select-none">
+      {/* Background Image: watch2gether.jpg (less brighter with subtle dark veil) */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden select-none">
+        <Image
+          src="/bg/watch2gether.jpg"
+          alt="Sunset Background"
+          fill
+          priority
+          sizes="100vw"
+          className="object-cover object-center brightness-[0.88] contrast-[1.05]"
+        />
+        <div className="absolute inset-0 bg-black/20" />
+      </div>
+
       <FloatingReactions reactions={floatingReactions} />
 
-      {/* Top Header Row with LHS expanding 'Add New Video' input */}
-      <RoomHeader
-        roomId={roomId}
-        hostParticipant={hostParticipant}
-        participants={participants}
-        isConnected={isConnected}
-        canControl={canControl}
-        copied={copied}
-        onCopyRoomLink={copyRoomLink}
-        onSubmitUrl={handleChangeVideo}
-        onLeaveRoom={() => router.push('/')}
-      />
+      {/* Main Centered Application Frame (constrained to match reference mockup alignment) */}
+      <div className="w-full max-w-[1360px] 2xl:max-w-[1480px] h-full max-h-[880px] flex flex-col justify-between mx-auto overflow-hidden">
+        {/* Top Navigation & Room Banner Card matching screenshot */}
+        <RoomHeader
+          roomId={roomId}
+          hostParticipant={hostParticipant}
+          currentUser={currentUser}
+          participants={participants}
+          isConnected={isConnected}
+          canControl={canControl}
+          copied={copied}
+          onCopyRoomLink={copyRoomLink}
+          onSubmitUrl={handleChangeVideo}
+          onLeaveRoom={() => router.push('/')}
+        />
 
-      {/* Main Content Area: Left Video Section + Right Chat Sidebar */}
-      <div className="flex-1 min-h-0 w-full flex flex-row overflow-hidden">
-        {/* Left Column: Video Area */}
-        <div className="flex-1 min-w-0 flex flex-col justify-between p-4 sm:p-5 overflow-hidden">
-          <VideoSection
-            playerRef={playerRef}
-            videoId={videoId}
-            participantCount={participants.length}
-            isPlaying={isPlaying}
-            canControl={canControl}
-            onLocalPlay={(time) => {
-              setIsPlaying(true);
-              socket.emit('play', { roomId, currentTime: time });
-            }}
-            onLocalPause={(time) => {
-              setIsPlaying(false);
-              socket.emit('pause', { roomId, currentTime: time });
-            }}
-            onLocalSeek={(time) => {
-              socket.emit('seek', { roomId, time });
-            }}
-            onTogglePlay={handleTogglePlay}
-          />
-        </div>
+        {/* Main Content Area: Left Video & Controls + Right 2 Stacked Cards (Participants & Chat) */}
+        <div className="flex-1 min-h-0 w-full flex flex-col lg:flex-row overflow-hidden gap-3.5 lg:gap-4 xl:gap-5">
+          {/* Left Column: Video Area & Controls Bar */}
+          <div className="flex-1 min-w-0 h-full flex flex-col justify-between overflow-hidden">
+            <VideoSection
+              playerRef={playerRef}
+              videoId={videoId}
+              isPlaying={isPlaying}
+              canControl={canControl}
+              onLocalPlay={(time) => {
+                setIsPlaying(true);
+                socket.emit('play', { roomId, currentTime: time });
+              }}
+              onLocalPause={(time) => {
+                setIsPlaying(false);
+                socket.emit('pause', { roomId, currentTime: time });
+              }}
+              onLocalSeek={(time) => {
+                socket.emit('seek', { roomId, time });
+              }}
+              onTogglePlay={handleTogglePlay}
+              onOpenChangeVideo={() => setIsChangeVideoOpen(true)}
+            />
+          </div>
 
-        {/* Right Column: Chat Sidebar */}
-        <div className="w-[280px] sm:w-[320px] xl:w-[360px] shrink-0 h-full min-h-0 flex flex-col border-l border-white/[0.06]">
-          <ChatBox
-            messages={messages}
-            participants={participants}
-            currentSocketId={socketId}
-            chatInput={chatInput}
-            onChatInputChange={setChatInput}
-            onSendMessage={handleSendMessage}
-            onSendReaction={handleSendReaction}
-            onOpenParticipants={() => setIsParticipantsOpen(true)}
-            chatBottomRef={chatBottomRef}
-          />
+          {/* Right Column: Two Stacked Cards matching screenshot (Participants Card on Top, Chat on Bottom) */}
+          <div className="w-full lg:w-[320px] xl:w-[350px] 2xl:w-[370px] shrink-0 h-full min-h-0 flex flex-col justify-between overflow-hidden">
+            <ParticipantsCard
+              participants={participants}
+              currentSocketId={socketId}
+              isHost={isHost}
+              onOpenModal={() => setIsParticipantsOpen(true)}
+            />
+
+            <ChatBox
+              messages={messages}
+              participants={participants}
+              currentSocketId={socketId}
+              chatInput={chatInput}
+              onChatInputChange={setChatInput}
+              onSendMessage={handleSendMessage}
+              onSendReaction={handleSendReaction}
+              onOpenParticipants={() => setIsParticipantsOpen(true)}
+              chatBottomRef={chatBottomRef}
+            />
+          </div>
         </div>
       </div>
+
+      {/* Modal: Change Video URL (triggered by Room Settings button) */}
+      <ChangeVideoModal
+        isOpen={isChangeVideoOpen}
+        onClose={() => setIsChangeVideoOpen(false)}
+        onSubmitUrl={handleChangeVideo}
+        canControl={canControl}
+      />
 
       {/* Modal: Room Participants Roster & Moderation */}
       <ParticipantsModal

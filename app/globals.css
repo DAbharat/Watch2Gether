@@ -70,6 +70,239 @@ input[type="submit"]:disabled {
   box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7), 0 0 25px -10px rgba(45, 212, 191, 0.1);
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   DESIGN DIRECTION: Exact Sunset Cloud Gradient Glass Cards (Lighter)
+   ───────────────────────────────────────────────────────────────────────────── */
+:root {
+  --card-bg: linear-gradient(
+    95deg,
+    rgba(68, 22, 82, 0.78) 0%,
+    rgba(94, 28, 104, 0.76) 35%,
+    rgba(132, 38, 122, 0.74) 55%,
+    rgba(180, 52, 126, 0.72) 72%,
+    rgba(222, 70, 132, 0.70) 86%,
+    rgba(244, 92, 144, 0.68) 100%
+  );
+  --card-bg-fallback: linear-gradient(
+    95deg,
+    #441652 0%,
+    #5e1c68 35%,
+    #84267a 55%,
+    #b4347e 72%,
+    #de4684 86%,
+    #f45c90 100%
+  );
+  --card-border-gradient: linear-gradient(
+    95deg,
+    rgba(225, 95, 175, 0.65) 0%,
+    rgba(245, 110, 180, 0.82) 60%,
+    rgba(255, 160, 170, 0.95) 100%
+  );
+  --card-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 0 50px -5px rgba(225, 65, 118, 0.35);
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.82);
+  --card-inner-bg: rgba(255, 255, 255, 0.08);
+  --card-inner-border: rgba(255, 255, 255, 0.15);
+  --radius-card: 28px;
+  --radius-card-inner: 16px;
+
+  /* Cinema Mode Tokens for Watch Party Room */
+  --cinema-card-bg: linear-gradient(
+    145deg,
+    rgba(34, 14, 54, 0.82) 0%,
+    rgba(16, 7, 30, 0.90) 100%
+  );
+  --cinema-card-bg-fallback: #160b24;
+  --cinema-border-gradient: linear-gradient(
+    135deg,
+    #ff8a5c 0%,
+    #c13b8f 50%,
+    #5b3cc4 100%
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   WHITE TRANSLUCENT FROSTED GLASS (Matches Reference Design Exactly)
+   ───────────────────────────────────────────────────────────────────────────── */
+.glass-white-card {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.12) 100%) !important;
+  backdrop-filter: blur(28px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(140%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.34) !important;
+  box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.3), inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.45) !important;
+}
+
+.glass-white-pill {
+  background: rgba(255, 255, 255, 0.16) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.32) !important;
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.3) !important;
+}
+
+.glass-white-pill:hover {
+  background: rgba(255, 255, 255, 0.26) !important;
+  border-color: rgba(255, 255, 255, 0.45) !important;
+}
+
+.glass-white-input {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border: 1px solid rgba(255, 255, 255, 0.28) !important;
+  box-shadow: inset 0 1px 2px 0 rgba(0, 0, 0, 0.15) !important;
+}
+
+.glass-white-input:focus-within {
+  background: rgba(255, 255, 255, 0.18) !important;
+  border-color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Main Card Panel: Tinted dark glass with sky gradient border */
+.card-tinted {
+  position: relative;
+  background: var(--card-bg-fallback);
+  border-radius: var(--radius-card);
+  box-shadow: var(--card-shadow);
+  transition: transform 200ms ease, box-shadow 200ms ease;
+  overflow: hidden;
+}
+
+@supports (backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px)) {
+  .card-tinted {
+    background: var(--card-bg);
+    backdrop-filter: blur(20px) saturate(130%);
+    -webkit-backdrop-filter: blur(20px) saturate(130%);
+  }
+}
+
+.card-tinted::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--card-border-gradient);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.85;
+  transition: opacity 200ms ease, filter 200ms ease;
+  z-index: 1;
+}
+
+.card-tinted:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 28px 65px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.card-tinted:hover::before {
+  opacity: 1;
+  filter: brightness(1.2);
+}
+
+/* Inner elements: role boxes, notification strip, action row, message input */
+.card-inner {
+  background: var(--card-inner-bg);
+  border: 1px solid var(--card-inner-border);
+  border-radius: var(--radius-card-inner);
+}
+
+.text-card-secondary {
+  color: var(--text-secondary);
+}
+
+/* Cinema Mode Panels: Dark tinted glass with sky gradient border for Watch Party */
+.card-cinema {
+  position: relative;
+  background: var(--cinema-card-bg-fallback);
+  border-radius: var(--radius-card);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: transform 200ms ease, box-shadow 200ms ease;
+  overflow: hidden;
+}
+
+@supports (backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px)) {
+  .card-cinema {
+    background: var(--cinema-card-bg);
+    backdrop-filter: blur(20px) saturate(130%);
+    -webkit-backdrop-filter: blur(20px) saturate(130%);
+  }
+}
+
+.card-cinema::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--cinema-border-gradient);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.85;
+  transition: opacity 200ms ease, filter 200ms ease;
+  z-index: 1;
+}
+
+/* Video Player Container in Cinema Mode */
+.video-cinema-container {
+  position: relative;
+  border-radius: 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 20px 50px -10px rgba(193, 59, 143, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.video-cinema-container::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--cinema-border-gradient);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.9;
+  z-index: 10;
+}
+
+/* Scroll Reveal Motion for Landing Page */
+.reveal-on-scroll {
+  opacity: 0;
+  transform: translate3d(0, 36px, 0);
+  transition: opacity 800ms cubic-bezier(0.16, 1, 0.3, 1),
+              transform 800ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.reveal-on-scroll.is-revealed {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-tinted,
+  .card-cinema,
+  .reveal-on-scroll {
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .card-tinted:hover,
+  .card-cinema:hover {
+    transform: none !important;
+  }
+  .card-tinted::before,
+  .card-cinema::before {
+    transition: none !important;
+  }
+}
+
 @theme inline {
   --font-heading: var(--font-host-grotesk);
   --font-sans: var(--font-host-grotesk);
