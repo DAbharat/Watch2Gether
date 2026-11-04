@@ -125,18 +125,18 @@ sequenceDiagram
     participant Redis as Redis Storage
 
     Note over Client,Server: Phase 1: NTP Clock Skew Calculation
-    Client->>Server: ntp_ping { clientSendTime: T0 }
-    Server-->>Client: ntp_pong { clientSendTime: T0, serverTime: T_server }
+    Client->>Server: ntp_ping (clientSendTime: T0)
+    Server-->>Client: ntp_pong (clientSendTime: T0, serverTime: T_server)
     Note over Client: Calculate RTT = T1 - T0<br/>Calculate Offset = T_server + (RTT / 2) - T1
 
     Note over Client,Server: Phase 2: Host Initiates Playback
-    Client->>Server: play { roomId, currentTime: 45.2 }
+    Client->>Server: play (roomId, currentTime: 45.2)
     Server->>Server: Verify RBAC Role (Host / Mod)
     Server->>Server: Update Timeline Anchor<br/>anchorPosition = 45.2<br/>anchorServerTime = Date.now()
-    Server-->>Client: play { currentTime, anchorPosition, anchorServerTime, sentAt }
+    Server-->>Client: play (currentTime, anchorPosition, anchorServerTime, sentAt)
 
     Note over Client: Phase 3: Client Local Drift Correction
-    Note over Client: Local Target = anchorPosition + (getServerNow() - anchorServerTime)<br/>if |Current - Target| > 1.5s -> seekTo(Target)<br/>if 0.25s < |Current - Target| <= 1.5s -> adjust playbackRate (0.95x / 1.05x)
+    Note over Client: Target = anchorPosition + (getServerNow() - anchorServerTime)<br/>Major drift (> 1.5s): seekTo(Target)<br/>Minor drift (0.25s - 1.5s): adjust playbackRate
 ```
 
 ### Moderated Video Request Sequence
@@ -149,18 +149,18 @@ sequenceDiagram
     participant Host as Host / Moderator
     participant Redis as Redis Storage
 
-    Viewer->>Server: request_action { type: "change_video", payload: { videoId } }
+    Viewer->>Server: request_action (type: change_video, payload: videoId)
     Server->>Server: Verify Requester Membership
     Server->>Server: Create ActionRequest Object
-    Server-->>Host: action_requested { requestId, requesterName, type, payload }
-    Server-->>Viewer: action_request_sent { requestId }
+    Server-->>Host: action_requested (requestId, requesterName, type, payload)
+    Server-->>Viewer: action_request_sent (requestId)
 
-    Host->>Server: approve_action { roomId, requestId }
+    Host->>Server: approve_action (roomId, requestId)
     Server->>Server: Verify Host/Mod Permission
     Server->>Server: Apply Playback State Mutation
-    Server-->>Viewer: action_approved { requestId, type }
-    Server-->>Host: action_resolved { requestId }
-    Server-->>Viewer: change_video { videoId }
+    Server-->>Viewer: action_approved (requestId, type)
+    Server-->>Host: action_resolved (requestId)
+    Server-->>Viewer: change_video (videoId)
     Server-.->Redis: Save queue mutation asynchronously
 ```
 
