@@ -394,7 +394,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             userId,
             socketId: '',
             username: username || 'User',
-            role: role || 'participant'
+            role: role || 'participant',
+            joinedAt: Date.now(),
           }];
         });
       }
