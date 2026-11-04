@@ -76,10 +76,11 @@ export function ParticipantsModal({
 
   const handleConfirmAction = () => {
     if (!dialogState.targetUser) return;
+    const targetId = dialogState.targetUser.userId || dialogState.targetUser.socketId;
     if (dialogState.type === 'role' && dialogState.targetRole) {
-      onAssignRole(dialogState.targetUser.socketId, dialogState.targetRole);
+      onAssignRole(targetId, dialogState.targetRole);
     } else if (dialogState.type === 'remove') {
-      onRemoveUser(dialogState.targetUser.socketId);
+      onRemoveUser(targetId);
     }
     setDialogState({ isOpen: false, type: 'role', targetUser: null });
   };
@@ -119,12 +120,12 @@ export function ParticipantsModal({
             <p className="text-center py-8 text-xs text-white/60">No active participants</p>
           ) : (
             participants.map((p) => {
-              const isMe = p.socketId === currentSocketId;
-              const isMenuOpen = activeMenuUserId === p.socketId;
+              const isMe = p.socketId === currentSocketId || p.userId === currentSocketId;
+              const isMenuOpen = activeMenuUserId === (p.userId || p.socketId);
 
               return (
                 <div
-                  key={p.socketId}
+                  key={p.userId || p.socketId}
                   className="group px-3 py-2.5 rounded-2xl flex items-center justify-between gap-3 text-xs hover:bg-white/10 transition-colors relative"
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -161,7 +162,7 @@ export function ParticipantsModal({
                           <div className="relative">
                             <button
                               onClick={() =>
-                                setActiveMenuUserId(isMenuOpen ? null : p.socketId)
+                                setActiveMenuUserId(isMenuOpen ? null : (p.userId || p.socketId))
                               }
                               className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
                                 isMenuOpen

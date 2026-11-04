@@ -1,15 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Send, UserMinus, MoreVertical, ShieldCheck, Eye } from 'lucide-react';
-import { Role, ParticipantData, ChatMessage } from '@/lib/types';
-import { RoleIcon, RoleBadge } from '@/lib/roles';
+import React, { useState, useRef, useEffect } from 'react';
+import { MessageSquare, Users, Send, Mic, MoreVertical } from 'lucide-react';
+import { ChatMessage, ParticipantData } from '@/lib/types';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { getAvatarForUser } from '@/lib/avatars';
 
 interface RoomSidebarProps {
-  activeTab: 'chat' | 'participants';
-  onTabChange: (tab: 'chat' | 'participants') => void;
   messages: ChatMessage[];
   participants: ParticipantData[];
   currentSocketId: string;
@@ -17,24 +14,23 @@ interface RoomSidebarProps {
   chatInput: string;
   onChatInputChange: (val: string) => void;
   onSendMessage: (e: React.FormEvent) => void;
-  onSendReaction: (emoji: string) => void;
-  onAssignRole: (userId: string, role: Role) => void;
-  onRemoveUser: (userId: string) => void;
+  onOpenModal?: () => void;
   chatBottomRef: React.RefObject<HTMLDivElement | null>;
+  defaultTab?: 'chat' | 'participants';
 }
 
-interface DialogState {
-  isOpen: boolean;
-  type: 'role' | 'remove';
-  targetUser: ParticipantData | null;
-  targetRole?: Role;
+function formatMessageTime(timestamp: number): string {
+  try {
+    return new Date(timestamp).toLocaleTimeString([], {
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
 }
-
-const REACTION_EMOJIS = ['🔥', '❤️', '😂', '👏', '🚀'];
 
 export function RoomSidebar({
-  activeTab,
-  onTabChange,
   messages,
   participants,
   currentSocketId,
@@ -42,393 +38,236 @@ export function RoomSidebar({
   chatInput,
   onChatInputChange,
   onSendMessage,
-  onSendReaction,
-  onAssignRole,
-  onRemoveUser,
+  onOpenModal,
   chatBottomRef,
+  defaultTab = 'chat',
 }: RoomSidebarProps) {
-  const [activeMenuUserId, setActiveMenuUserId] = useState<string | null>(null);
-  const [dialogState, setDialogState] = useState<DialogState>({
-    isOpen: false,
-    type: 'role',
-    targetUser: null,
-  });
+  const [activeTab, setActiveTab] = useState<'chat' | 'participants'>(defaultTab);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Close menus on Escape key
+  // Auto-scroll chat to bottom when messages update and chat is active
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setActiveMenuUserId(null);
-        setDialogState({ isOpen: false, type: 'role', targetUser: null });
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  const openRoleDialog = (user: ParticipantData) => {
-    const nextRole: Role = user.role === 'moderator' ? 'participant' : 'moderator';
-    setDialogState({
-      isOpen: true,
-      type: 'role',
-      targetUser: user,
-      targetRole: nextRole,
-    });
-  };
-
-  const openRemoveDialog = (user: ParticipantData) => {
-    setDialogState({
-      isOpen: true,
-      type: 'remove',
-      targetUser: user,
-    });
-  };
-
-  const handleConfirmAction = () => {
-    if (!dialogState.targetUser) return;
-
-    if (dialogState.type === 'role' && dialogState.targetRole) {
-      onAssignRole(dialogState.targetUser.socketId, dialogState.targetRole);
-    } else if (dialogState.type === 'remove') {
-      onRemoveUser(dialogState.targetUser.socketId);
+    if (activeTab === 'chat' && chatBottomRef.current) {
+      chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-
-    setDialogState({ isOpen: false, type: 'role', targetUser: null });
-  };
+  }, [messages, activeTab, chatBottomRef]);
 
   return (
-    <>
-      <div className="h-full flex flex-col rounded-xl bg-white/[0.025] border border-white/[0.07] overflow-hidden">
-        {/* Tabs Header with Underline for Active Tab */}
-        <div className="flex border-b border-white/[0.06] px-4 gap-6 bg-transparent shrink-0">
+    <div className="w-full h-full glass-white-card rounded-2xl sm:rounded-3xl p-4 flex flex-col shadow-xl overflow-hidden select-none">
+      {/* 1. Header with Tab Switcher */}
+      <div className="flex items-center justify-between pb-3 border-b border-white/20 shrink-0">
+        <div className="flex items-center gap-1.5 p-1 rounded-full bg-white/10 border border-white/15">
+          {/* Chat Tab Button */}
           <button
-            onClick={() => onTabChange('chat')}
-            className={`pb-2.5 pt-3 text-xs font-medium relative transition-colors cursor-pointer ${
+            type="button"
+            onClick={() => setActiveTab('chat')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
               activeTab === 'chat'
-                ? 'text-zinc-100 font-semibold'
-                : 'text-zinc-500 hover:text-zinc-300'
+                ? 'bg-white/25 text-white shadow-sm backdrop-blur-sm'
+                : 'text-white/60 hover:text-white hover:bg-white/10'
             }`}
           >
-            <span>Chat ({messages.length})</span>
-            {activeTab === 'chat' && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-teal-400 rounded-full" />
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>Chat</span>
+            {messages.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 text-white font-mono">
+                {messages.length}
+              </span>
             )}
           </button>
 
+          {/* Participants Tab Button */}
           <button
-            onClick={() => onTabChange('participants')}
-            className={`pb-2.5 pt-3 text-xs font-medium relative transition-colors cursor-pointer ${
+            type="button"
+            onClick={() => setActiveTab('participants')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
               activeTab === 'participants'
-                ? 'text-zinc-100 font-semibold'
-                : 'text-zinc-500 hover:text-zinc-300'
+                ? 'bg-white/25 text-white shadow-sm backdrop-blur-sm'
+                : 'text-white/60 hover:text-white hover:bg-white/10'
             }`}
           >
-            <span>Participants ({participants.length})</span>
-            {activeTab === 'participants' && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-teal-400 rounded-full" />
-            )}
+            <Users className="w-3.5 h-3.5" />
+            <span>Participants</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 text-white font-mono">
+              {participants.length}
+            </span>
           </button>
         </div>
 
-        {/* Chat Tab Panel */}
-        {activeTab === 'chat' && (
-          <div className="flex-1 min-h-0 flex flex-col justify-between overflow-hidden">
-            {/* Scrollable messages */}
-            <div className="flex-1 min-h-0 p-4 overflow-y-auto space-y-3">
-              {messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-zinc-500 text-xs py-8">
-                  <p>No messages yet</p>
-                  <p className="text-[11px] text-zinc-600 mt-0.5">Start the conversation</p>
-                </div>
-              ) : (
-                messages.map((m) => {
-                  const avatarUrl = getAvatarForUser(
-                    { userId: m.userId, username: m.username, avatar: m.avatar },
-                    participants
-                  );
-
-                  return (
-                    <div key={m.id} className="flex gap-2.5 text-xs group">
-                      <Avatar size="sm" className="w-6 h-6 shrink-0 mt-0.5 border border-white/[0.08]">
-                        <AvatarImage src={avatarUrl} alt={m.username} className="object-cover" />
-                        <AvatarFallback className="bg-white/[0.06] text-zinc-300 font-semibold text-[10px]">
-                          {m.username.charAt(0).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-medium text-zinc-300">{m.username}</span>
-                          {m.role === 'host' && (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-white/[0.05] text-zinc-200 border border-white/10 inline-flex items-center gap-1">
-                              <RoleIcon role="host" size={11} strokeWidth={1.75} />
-                              <span>Host</span>
-                            </span>
-                          )}
-                          {m.role === 'moderator' && (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-white/[0.03] text-zinc-400 border border-white/[0.07] inline-flex items-center gap-1">
-                              <RoleIcon role="moderator" size={11} strokeWidth={1.75} />
-                              <span>Mod</span>
-                            </span>
-                          )}
-                          <span className="text-[10px] text-zinc-500 font-mono ml-auto">
-                            {new Date(m.timestamp).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </span>
-                        </div>
-                        <p className="text-zinc-300 bg-white/[0.02] p-2 rounded-lg border border-white/[0.04] break-words text-xs">
-                          {m.text}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-              <div ref={chatBottomRef} />
-            </div>
-
-            {/* Pinned Bottom: Quick Reactions + Chat Input */}
-            <div className="border-t border-white/[0.06] bg-black/20 shrink-0">
-              {/* Quick Reactions */}
-              <div className="px-3 pt-2 pb-1 flex items-center justify-around">
-                {REACTION_EMOJIS.map((emoji) => (
-                  <button
-                    key={emoji}
-                    onClick={() => onSendReaction(emoji)}
-                    className="p-1 hover:scale-120 transition-transform text-sm opacity-70 hover:opacity-100 cursor-pointer"
-                    title={`Send ${emoji}`}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-
-              {/* Message input */}
-              <form onSubmit={onSendMessage} className="p-3 pt-1 flex gap-2">
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => onChatInputChange(e.target.value)}
-                  placeholder="Type a message..."
-                  maxLength={200}
-                  className="flex-1 px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.07] text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors"
-                />
-                <button
-                  type="submit"
-                  disabled={!chatInput.trim()}
-                  className="p-2 rounded-lg bg-white/[0.08] hover:bg-white/[0.12] text-zinc-200 disabled:opacity-30 transition-colors cursor-pointer disabled:cursor-not-allowed"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Participants Tab Panel */}
-        {activeTab === 'participants' && (
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {participants.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-zinc-500 text-xs py-8">
-                <p>No active participants</p>
-              </div>
-            ) : (
-              <div className="p-2 space-y-1">
-                {participants.map((p) => {
-                  const isMe = p.socketId === currentSocketId;
-                  const isMenuOpen = activeMenuUserId === p.socketId;
-
-                  return (
-                    <div
-                      key={p.socketId}
-                      className="group px-3 py-2.5 rounded-xl flex items-center justify-between gap-3 text-xs hover:bg-white/[0.03] transition-colors relative"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        {/* Shadcn Avatar with sequential allocation */}
-                        <Avatar size="default" className="w-9 h-9 shrink-0 border border-white/[0.08]">
-                          <AvatarImage
-                            src={getAvatarForUser(p, participants)}
-                            alt={p.username}
-                            className="object-cover"
-                          />
-                          <AvatarFallback className="bg-white/[0.06] text-zinc-300 font-semibold text-xs">
-                            {p.username.charAt(0).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-
-                        <div className="min-w-0 flex items-center gap-1.5">
-                          <span className="font-medium text-sm text-zinc-100 truncate">
-                            {p.username}
-                          </span>
-                          {isMe && (
-                            <span className="text-xs text-zinc-500 font-normal shrink-0">
-                              (You)
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Right side: Role Tag and Host Actions */}
-                      <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-                        <RoleBadge role={p.role} className="w-24 justify-center text-xs" size={13} />
-
-                        {/* 3-Dots Button slot: uniform width so all roles align in a single vertical line */}
-                        {isHost && (
-                          <div className="w-7 h-7 flex items-center justify-center shrink-0">
-                            {!isMe && (
-                              <div className="relative">
-                                <button
-                                  onClick={() =>
-                                    setActiveMenuUserId(isMenuOpen ? null : p.socketId)
-                                  }
-                                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                                    isMenuOpen
-                                      ? 'bg-white/[0.1] text-zinc-100'
-                                      : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.06]'
-                                  }`}
-                                  title="Member options"
-                                  aria-expanded={isMenuOpen}
-                                >
-                                  <MoreVertical className="w-4 h-4" strokeWidth={1.75} />
-                                </button>
-
-                                {/* Popover Menu */}
-                                {isMenuOpen && (
-                                  <>
-                                    {/* Invisible backdrop to dismiss popover when clicking outside */}
-                                    <div
-                                      className="fixed inset-0 z-20 cursor-pointer"
-                                      onClick={() => setActiveMenuUserId(null)}
-                                    />
-
-                                    <div className="absolute right-0 top-full mt-1 z-30 w-44 rounded-xl bg-[#090d12] border border-white/10 p-1 shadow-2xl backdrop-blur-xl animate-in fade-in-0 zoom-in-95 duration-100">
-                                      {/* Option 1: Make Moderator / Demote */}
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setActiveMenuUserId(null);
-                                          openRoleDialog(p);
-                                        }}
-                                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-white/[0.06] transition-colors text-left cursor-pointer"
-                                      >
-                                        {p.role === 'moderator' ? (
-                                          <>
-                                            <Eye className="w-3.5 h-3.5 text-zinc-400 shrink-0" strokeWidth={1.75} />
-                                            <span>Demote to Viewer</span>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <ShieldCheck className="w-3.5 h-3.5 text-zinc-400 shrink-0" strokeWidth={1.75} />
-                                            <span>Make Moderator</span>
-                                          </>
-                                        )}
-                                      </button>
-
-                                      <div className="my-1 h-px bg-white/[0.06]" />
-
-                                      {/* Option 2: Remove Member */}
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setActiveMenuUserId(null);
-                                          openRemoveDialog(p);
-                                        }}
-                                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-zinc-300 hover:text-rose-400 hover:bg-rose-500/10 transition-colors text-left cursor-pointer"
-                                      >
-                                        <UserMinus className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-                                        <span>Remove Member</span>
-                                      </button>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+        {/* Action Button: Open Full Modal if needed */}
+        {onOpenModal && (
+          <button
+            type="button"
+            onClick={onOpenModal}
+            title="Manage participants"
+            className="p-1.5 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+          >
+            <MoreVertical className="w-4 h-4" />
+          </button>
         )}
       </div>
 
-      {/* Alert Dialog (in black) for Confirming Actions */}
-      {dialogState.isOpen && dialogState.targetUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in-0 duration-150">
-          {/* Backdrop click to cancel */}
-          <div
-            className="absolute inset-0 cursor-pointer"
-            onClick={() =>
-              setDialogState({ isOpen: false, type: 'role', targetUser: null })
-            }
-          />
-
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            className="relative z-10 w-full max-w-md rounded-2xl bg-[#080c0d] border border-white/10 p-6 sm:p-7 shadow-2xl animate-in zoom-in-95 duration-150 text-left"
-          >
-            <div className="mb-5">
-              <div className="flex items-center gap-3 mb-3">
-                <Avatar size="default" className="w-9 h-9 border border-white/10 shrink-0">
-                  <AvatarImage
-                    src={getAvatarForUser(dialogState.targetUser, participants)}
-                    alt={dialogState.targetUser.username}
-                    className="object-cover"
-                  />
-                  <AvatarFallback className="bg-white/[0.06] text-zinc-300 font-semibold text-xs">
-                    {dialogState.targetUser.username.charAt(0).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <h3 className="text-base font-semibold text-zinc-100">
-                    {dialogState.type === 'role'
-                      ? dialogState.targetRole === 'moderator'
-                        ? 'Make Moderator'
-                        : 'Demote to Viewer'
-                      : 'Remove Member'}
-                  </h3>
-                  <p className="text-xs text-zinc-500">{dialogState.targetUser.username}</p>
-                </div>
+      {/* 2. Body View: Chat Tab */}
+      {activeTab === 'chat' && (
+        <div className="flex-1 min-h-0 flex flex-col justify-between overflow-hidden">
+          {/* Scrollable Messages Feed */}
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pt-3 pr-1">
+            {messages.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-white/60 text-xs py-12">
+                <MessageSquare className="w-8 h-8 stroke-1 text-white/40 mb-2" />
+                <p className="font-semibold text-white/90 text-xs">No messages yet</p>
+                <p className="text-[11px] text-white/60 mt-0.5">Be the first to say hi!</p>
               </div>
-              <p className="text-sm text-zinc-400 mt-2 leading-relaxed">
-                {dialogState.type === 'role'
-                  ? dialogState.targetRole === 'moderator'
-                    ? `Are you sure you want to make ${dialogState.targetUser.username} a moderator? They will be granted controls to play, pause, seek, and change videos for everyone.`
-                    : `Are you sure you want to demote ${dialogState.targetUser.username} to a viewer? They will no longer be able to control playback or change videos.`
-                  : `Are you sure you want to remove ${dialogState.targetUser.username} from the watch party? They will be disconnected from this room immediately.`}
-              </p>
-            </div>
+            ) : (
+              messages.map((m) => {
+                const isMe = m.userId === currentSocketId;
+                const avatarUrl = getAvatarForUser(
+                  { userId: m.userId, username: m.username, avatar: m.avatar },
+                  participants
+                );
+                const timeString = formatMessageTime(m.timestamp);
 
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/[0.06]">
-              <button
-                type="button"
-                onClick={() =>
-                  setDialogState({ isOpen: false, type: 'role', targetUser: null })
-                }
-                className="px-4 py-2 rounded-lg text-xs font-medium text-zinc-300 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmAction}
-                className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                  dialogState.type === 'remove'
-                    ? 'bg-rose-500 hover:bg-rose-400 text-white'
-                    : 'bg-teal-400 hover:bg-teal-300 text-black'
-                }`}
-              >
-                Proceed
-              </button>
-            </div>
+                return (
+                  <div key={m.id} className="flex items-start gap-2.5">
+                    {/* Avatar with green online dot */}
+                    <div className="relative shrink-0 mt-0.5">
+                      <Avatar size="sm" className="w-8 h-8 rounded-full border border-white/30 shadow">
+                        <AvatarImage src={avatarUrl} alt={m.username} className="object-cover" />
+                        <AvatarFallback className="bg-gradient-to-tr from-purple-500 to-pink-500 text-white font-bold text-xs">
+                          {m.username.charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-black/80" />
+                    </div>
+
+                    {/* Content: Username + Time + Message */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-xs font-semibold text-white truncate">
+                          {isMe ? 'You' : m.username}
+                        </span>
+                        <span className="text-[10px] text-white/60 font-normal shrink-0">
+                          {timeString}
+                        </span>
+                      </div>
+                      <p className="text-xs text-white/95 leading-relaxed font-normal mt-0.5 break-words">
+                        {m.text}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            <div ref={chatBottomRef} />
           </div>
+
+          {/* Bottom Pill Input with Coral Send Button */}
+          <form
+            onSubmit={onSendMessage}
+            className="relative flex items-center glass-white-input rounded-full px-4 py-1.5 mt-3 shadow-inner shrink-0"
+          >
+            <input
+              ref={inputRef}
+              type="text"
+              value={chatInput}
+              onChange={(e) => onChatInputChange(e.target.value)}
+              placeholder="Type a message..."
+              maxLength={250}
+              className="flex-1 bg-transparent text-xs text-white placeholder-white/60 outline-none pr-9 py-1 font-medium"
+            />
+
+            <button
+              type="submit"
+              disabled={!chatInput.trim()}
+              className="absolute right-1.5 w-7 h-7 rounded-full bg-[#F05A65] hover:bg-[#FF7180] disabled:opacity-40 disabled:hover:bg-[#F05A65] flex items-center justify-center text-white transition-all active:scale-95 cursor-pointer shadow-md shadow-red-500/20"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </form>
         </div>
       )}
-    </>
+
+      {/* 3. Body View: Participants Tab */}
+      {activeTab === 'participants' && (
+        <div className="flex-1 min-h-0 flex flex-col justify-between overflow-hidden">
+          {/* Scrollable Participants Roster */}
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5 pt-3 pr-1">
+            {participants.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-white/60 text-xs py-12">
+                <Users className="w-8 h-8 stroke-1 text-white/40 mb-2" />
+                <p className="font-semibold text-white/90 text-xs">No active participants</p>
+              </div>
+            ) : (
+              participants.map((p) => {
+                const isMe = p.socketId === currentSocketId || p.userId === currentSocketId;
+                const avatarUrl = getAvatarForUser(p, participants);
+                const isHostUser = p.role === 'host';
+                const isModUser = p.role === 'moderator';
+
+                return (
+                  <div
+                    key={p.userId || p.socketId}
+                    className="flex items-center justify-between py-1.5 px-2 rounded-xl hover:bg-white/[0.08] transition-colors"
+                  >
+                    {/* Left: Avatar with green online dot + username + role tag */}
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="relative shrink-0">
+                        <Avatar size="sm" className="w-8 h-8 rounded-full border border-white/30 shadow">
+                          <AvatarImage src={avatarUrl} alt={p.username} className="object-cover" />
+                          <AvatarFallback className="bg-gradient-to-tr from-purple-500 to-pink-500 text-white font-bold text-xs">
+                            {p.username.charAt(0).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        {/* Online indicator dot */}
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-black/80" />
+                      </div>
+
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-xs font-semibold text-white truncate">
+                          {p.username}
+                        </span>
+                        {isMe && (
+                          <span className="text-[10px] text-white/60 font-normal shrink-0">
+                            (You)
+                          </span>
+                        )}
+                        {isHostUser && (
+                          <span className="text-[11px] text-[#F05A65] font-semibold shrink-0">
+                            Host
+                          </span>
+                        )}
+                        {isModUser && (
+                          <span className="text-[11px] text-blue-300 font-semibold shrink-0">
+                            Mod
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Right: Microphone icon */}
+                    <div className="shrink-0 text-white/50 pl-2">
+                      <Mic className="w-4 h-4 text-white/60 hover:text-white transition-colors cursor-pointer" />
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Quick Roster Footer for Hosts */}
+          {isHost && onOpenModal && (
+            <div className="pt-3 border-t border-white/15 shrink-0">
+              <button
+                type="button"
+                onClick={onOpenModal}
+                className="w-full glass-white-pill py-2 rounded-full text-xs font-semibold text-white hover:bg-white/20 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+              >
+                <span>Manage Permissions & Roster</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

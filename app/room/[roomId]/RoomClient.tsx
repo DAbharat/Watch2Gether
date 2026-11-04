@@ -12,12 +12,12 @@ import { AlertCircle } from 'lucide-react';
 
 import { RoomHeader } from '@/components/room/RoomHeader';
 import { VideoSection } from '@/components/room/VideoSection';
-import { ParticipantsCard } from '@/components/room/ParticipantsCard';
-import { ChatBox } from '@/components/room/ChatBox';
+import { RoomSidebar } from '@/components/room/RoomSidebar';
 import { ChangeVideoModal } from '@/components/room/ChangeVideoModal';
 import { ParticipantsModal } from '@/components/room/ParticipantsModal';
 import { FloatingReactions } from '@/components/room/FloatingReactions';
 import { resetParticipantOrder } from '@/lib/avatars';
+import { getStableParticipant } from '@/lib/participant';
 
 interface RoomClientProps {
   roomId: string;
@@ -29,6 +29,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const socket = getSocket();
   const playerRef = useRef<YouTubePlayerRef>(null);
 
+  const { participantId, participantToken } = getStableParticipant(roomId);
+
   const [username, setUsername] = useState<string>('');
   const [socketId, setSocketId] = useState<string>('');
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -38,14 +40,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [hostSocketId, setHostSocketId] = useState<string>('');
   const [kickedMessage, setKickedMessage] = useState<string | null>(null);
 
-  const currentUser = participants.find((p) => p.socketId === socketId);
+  const currentUser = participants.find(
+    (p) => (participantId && p.userId === participantId) || p.socketId === socketId
+  );
   const userRole: Role = currentUser?.role || 'participant';
   const isHost = userRole === 'host';
   const isModerator = userRole === 'moderator';
   const canControl = isHost || isModerator;
 
   const hostParticipant = participants.find(
-    (p) => p.role === 'host' || p.socketId === hostSocketId
+    (p) => p.role === 'host' || (hostSocketId && p.socketId === hostSocketId)
   );
   const [isChangeVideoOpen, setIsChangeVideoOpen] = useState<boolean>(false);
   const [isParticipantsOpen, setIsParticipantsOpen] = useState<boolean>(false);
@@ -71,7 +75,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     const onConnect = () => {
       setIsConnected(true);
       setSocketId(socket.id || '');
-      socket.emit('join_room', { roomId, username: storedName });
+      socket.emit('join_room', {
+        roomId,
+        username: storedName,
+        participantId,
+        participantToken,
+      });
     };
 
     const onDisconnect = () => {
@@ -95,6 +104,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setIsPlaying(state.isPlaying);
       setParticipants(state.participants);
       setHostSocketId(state.hostSocketId);
+      if (state.messages && state.messages.length > 0) {
+        setMessages(state.messages);
+      }
 
       if (playerRef.current) {
         if (state.isPlaying) {
@@ -173,10 +185,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
     socket.on('role_changed', ({ socketId: changedId, newRole }: { socketId: string; newRole: Role }) => {
       setParticipants((prev) =>
-        prev.map((p) => (p.socketId === changedId ? { ...p, role: newRole } : p))
+        prev.map((p) => (p.socketId === changedId || p.userId === changedId ? { ...p, role: newRole } : p))
       );
-      if (changedId === socketId) {
-        const label = newRole === 'moderator' ? 'Moderator' : 'Participant';
+      if (changedId === socketId || changedId === participantId) {
+        const label = newRole === 'moderator' ? 'Moderator' : newRole === 'host' ? 'Host' : 'Participant';
         toast.add({
           title: 'Role Updated',
           description: `You are now a ${label}.`,
@@ -253,12 +265,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     });
   };
 
-  const handleAssignRole = (targetSocketId: string, newRole: Role) => {
-    socket.emit('assign_role', { roomId, targetSocketId, newRole });
+  const handleAssignRole = (targetId: string, newRole: Role) => {
+    socket.emit('assign_role', { roomId, userId: targetId, targetSocketId: targetId, newRole });
   };
 
-  const handleRemoveUser = (targetSocketId: string) => {
-    socket.emit('kick_user', { roomId, targetSocketId });
+  const handleRemoveUser = (targetId: string) => {
+    socket.emit('kick_user', { roomId, userId: targetId, targetSocketId: targetId });
   };
 
   if (kickedMessage) {
@@ -337,24 +349,17 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             />
           </div>
 
-          {/* Right Column: Two Stacked Cards matching screenshot (Participants Card on Top, Chat on Bottom) */}
-          <div className="w-full lg:w-[320px] xl:w-[350px] 2xl:w-[370px] shrink-0 h-full min-h-0 flex flex-col justify-between overflow-hidden">
-            <ParticipantsCard
-              participants={participants}
-              currentSocketId={socketId}
-              isHost={isHost}
-              onOpenModal={() => setIsParticipantsOpen(true)}
-            />
-
-            <ChatBox
+          {/* Right Column: Combined Chat & Participants Sidebar */}
+          <div className="w-full lg:w-[320px] xl:w-[350px] 2xl:w-[370px] shrink-0 h-full min-h-0 flex flex-col overflow-hidden">
+            <RoomSidebar
               messages={messages}
               participants={participants}
               currentSocketId={socketId}
+              isHost={isHost}
               chatInput={chatInput}
               onChatInputChange={setChatInput}
               onSendMessage={handleSendMessage}
-              onSendReaction={handleSendReaction}
-              onOpenParticipants={() => setIsParticipantsOpen(true)}
+              onOpenModal={() => setIsParticipantsOpen(true)}
               chatBottomRef={chatBottomRef}
             />
           </div>

@@ -44,14 +44,14 @@ export function ParticipantsCard({
       {/* Scrollable Participants List */}
       <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5 pt-3 pr-1">
         {participants.map((p) => {
-          const isMe = p.socketId === currentSocketId;
+          const isMe = p.socketId === currentSocketId || p.userId === currentSocketId;
           const avatarUrl = getAvatarForUser(p, participants);
           const isHostUser = p.role === 'host';
           const isModUser = p.role === 'moderator';
 
           return (
             <div
-              key={p.socketId}
+              key={p.userId || p.socketId}
               className="flex items-center justify-between py-1 px-1.5 rounded-xl hover:bg-white/[0.08] transition-colors"
             >
               {/* Left: Avatar with green online dot + username + role tag */}

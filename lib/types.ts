@@ -17,6 +17,7 @@ export interface RoomState {
   playState: 'playing' | 'paused';
   hostSocketId: string;
   participants: ParticipantData[];
+  messages?: ChatMessage[];
 }
 
 export interface ChatMessage {
