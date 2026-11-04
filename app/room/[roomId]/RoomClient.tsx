@@ -15,6 +15,7 @@ import { VideoSection } from '@/components/room/VideoSection';
 import { RoomSidebar } from '@/components/room/RoomSidebar';
 import { ChangeVideoModal } from '@/components/room/ChangeVideoModal';
 import { ParticipantsModal } from '@/components/room/ParticipantsModal';
+import { SetUsernameModal } from '@/components/room/SetUsernameModal';
 import { FloatingReactions } from '@/components/room/FloatingReactions';
 import { resetParticipantOrder } from '@/lib/avatars';
 import { getStableParticipant } from '@/lib/participant';
@@ -53,10 +54,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   );
   const [isChangeVideoOpen, setIsChangeVideoOpen] = useState<boolean>(false);
   const [isParticipantsOpen, setIsParticipantsOpen] = useState<boolean>(false);
+  const [isNameModalOpen, setIsNameModalOpen] = useState<boolean>(false);
 
   const [copied, setCopied] = useState<boolean>(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState<string>('');
+  const [typingUsers, setTypingUsers] = useState<{ userId: string; username: string }[]>([]);
   const [floatingReactions, setFloatingReactions] = useState<ReactionData[]>([]);
   const [requests, setRequests] = useState<VideoRequest[]>([]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -114,11 +117,22 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   useEffect(() => {
     let storedName = localStorage.getItem('wtg_username');
+    const isCustom = localStorage.getItem('wtg_username_custom') === 'true';
+    const isDefaultName = !storedName || /^User_\d+$/i.test(storedName.trim());
+
     if (!storedName) {
       storedName = `User_${Math.floor(1000 + Math.random() * 9000)}`;
       localStorage.setItem('wtg_username', storedName);
     }
     setUsername(storedName);
+
+    // If joining with a default system-generated username, prompt them to personalize it
+    let promptTimer: NodeJS.Timeout | undefined;
+    if (isDefaultName && !isCustom) {
+      promptTimer = setTimeout(() => {
+        setIsNameModalOpen(true);
+      }, 500);
+    }
 
     if (!socket.connected) {
       socket.connect();
@@ -359,6 +373,52 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setParticipants(updatedParticipants);
     });
 
+    socket.on('user_joined', ({ participants: updatedList, participant: newParticipant, userId, username, role }: {
+      participants?: ParticipantData[];
+      participant?: ParticipantData;
+      userId?: string;
+      username?: string;
+      role?: Role;
+    }) => {
+      if (updatedList && updatedList.length > 0) {
+        setParticipants(updatedList);
+      } else if (newParticipant) {
+        setParticipants((prev) => {
+          if (prev.some((p) => p.userId === newParticipant.userId)) return prev;
+          return [...prev, newParticipant];
+        });
+      } else if (userId) {
+        setParticipants((prev) => {
+          if (prev.some((p) => p.userId === userId)) return prev;
+          return [...prev, {
+            userId,
+            socketId: '',
+            username: username || 'User',
+            role: role || 'participant'
+          }];
+        });
+      }
+    });
+
+    socket.on('user_left', ({ userId, participants: updatedList }: { userId?: string; participants?: ParticipantData[] }) => {
+      if (updatedList && updatedList.length > 0) {
+        setParticipants(updatedList);
+      } else if (userId) {
+        setParticipants((prev) => prev.filter((p) => p.userId !== userId));
+      }
+    });
+
+    socket.on('user_typing', ({ userId, username: typingName, isTyping }: { userId: string; username: string; isTyping: boolean }) => {
+      setTypingUsers((prev) => {
+        if (isTyping) {
+          if (prev.some((u) => u.userId === userId)) return prev;
+          return [...prev, { userId, username: typingName }];
+        } else {
+          return prev.filter((u) => u.userId !== userId);
+        }
+      });
+    });
+
     socket.on('chat_message', (msg: ChatMessage) => {
       setMessages((prev) => [...prev, msg]);
       setTimeout(() => {
@@ -511,6 +571,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }, 1000);
 
     return () => {
+      if (promptTimer) clearTimeout(promptTimer);
       clearInterval(reconcileInterval);
       clearInterval(ntpInterval);
       clearInterval(heartbeatInterval);
@@ -524,6 +585,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       socket.off('playback_sync');
       socket.off('change_video');
       socket.off('participants_update');
+      socket.off('user_joined');
+      socket.off('user_left');
+      socket.off('user_typing');
       socket.off('chat_message');
       socket.off('reaction');
       socket.off('role_changed');
@@ -574,6 +638,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     e.preventDefault();
     if (!chatInput.trim()) return;
     socket.emit('chat_message', { roomId, text: chatInput.trim() });
+    socket.emit('typing_stop', { roomId });
     setChatInput('');
   };
 
@@ -628,6 +693,30 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }
   };
 
+  const handleSaveUsername = (newName: string) => {
+    const clean = newName.trim().slice(0, 25);
+    if (!clean) return;
+
+    localStorage.setItem('wtg_username', clean);
+    localStorage.setItem('wtg_username_custom', 'true');
+    setUsername(clean);
+
+    socket.emit('join_room', {
+      roomId,
+      username: clean,
+      participantId,
+      participantToken,
+    });
+
+    setIsNameModalOpen(false);
+
+    toast.add({
+      title: 'Name Saved',
+      description: `You are now known as "${clean}".`,
+      type: 'success',
+    });
+  };
+
   if (kickedMessage) {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#0b0c0f] text-zinc-100">
@@ -647,7 +736,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   }
 
   return (
-    <div className="h-screen w-screen max-h-screen overflow-hidden text-white flex flex-col justify-center items-center p-3 sm:p-5 lg:p-7 xl:p-9 relative select-none">
+    <div className="h-screen w-screen max-h-screen overflow-hidden text-white flex flex-col justify-center items-center p-3 sm:p-5 lg:p-7 xl:p-9 max-lg:p-2.5 relative select-none">
       {/* Background Image: watch2gether.jpg (a little more dark veil for optimal frosted glass contrast) */}
       <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden select-none">
         <Image
@@ -665,24 +754,26 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
       {/* Main Centered Application Frame: Full-width Header at top, Video & Chat below it */}
       <div className="w-full max-w-[1140px] xl:max-w-[1200px] 2xl:max-w-[1260px] h-full max-h-[850px] flex flex-col items-stretch mx-auto overflow-hidden">
-        {/* Full-Width Header taking the entire horizontal space */}
-        <RoomHeader
-          roomId={roomId}
-          hostParticipant={hostParticipant}
-          currentUser={currentUser}
-          participants={participants}
-          isConnected={isConnected}
-          canControl={canControl}
-          copied={copied}
-          onCopyRoomLink={copyRoomLink}
-          onSubmitUrl={handleChangeVideo}
-          onLeaveRoom={() => router.push('/')}
-        />
+        {/* Full-Width Header taking the entire horizontal space (DESKTOP ONLY) */}
+        <div className="hidden lg:block w-full shrink-0">
+          <RoomHeader
+            roomId={roomId}
+            hostParticipant={hostParticipant}
+            currentUser={currentUser}
+            participants={participants}
+            isConnected={isConnected}
+            canControl={canControl}
+            copied={copied}
+            onCopyRoomLink={copyRoomLink}
+            onSubmitUrl={handleChangeVideo}
+            onLeaveRoom={() => router.push('/')}
+          />
+        </div>
 
         {/* Content Area below Header: Left (Video Player & Controls) & Right (Chat / Participants Sidebar) */}
-        <div className="flex-1 min-h-0 w-full flex flex-col lg:flex-row items-stretch overflow-hidden gap-3.5 lg:gap-4 xl:gap-5">
-          {/* Left Column: Video Player & Controls Bar */}
-          <div className="flex-1 min-w-0 h-full flex flex-col justify-between overflow-hidden">
+        <div className="flex-1 min-h-0 w-full flex flex-col lg:flex-row items-stretch overflow-hidden gap-3.5 lg:gap-4 xl:gap-5 max-lg:gap-2">
+          {/* Left Column: Video Player & Controls Bar (Identical to original on desktop, 40% height on mobile) */}
+          <div className="flex-1 min-w-0 h-full flex flex-col justify-between overflow-hidden max-lg:flex-none max-lg:h-[40%] max-lg:min-h-0 max-lg:w-full">
             <VideoSection
               playerRef={playerRef}
               videoId={videoId}
@@ -720,8 +811,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             />
           </div>
 
-          {/* Right Column: Chat, Participants & Requests Sidebar */}
-          <div className="w-full lg:w-[340px] xl:w-[365px] 2xl:w-[380px] shrink-0 h-full min-h-0 flex flex-col overflow-hidden">
+          {/* Right Column: Chat, Participants & Requests Sidebar (Identical to original on desktop, 60% height on mobile) */}
+          <div className="w-full lg:w-[340px] xl:w-[365px] 2xl:w-[380px] shrink-0 h-full min-h-0 flex flex-col overflow-hidden max-lg:flex-1 max-lg:min-h-0">
             <RoomSidebar
               messages={messages}
               participants={participants}
@@ -741,6 +832,14 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               queue={queue}
               onRequestVideo={handleRequestVideo}
               onResolveRequest={handleResolveRequest}
+              onCopyRoomLink={copyRoomLink}
+              copied={copied}
+              onLeaveRoom={() => router.push('/')}
+              hostName={hostParticipant?.username || 'Host'}
+              roomId={roomId}
+              typingUsers={typingUsers}
+              onTypingStart={() => socket.emit('typing_start', { roomId })}
+              onTypingStop={() => socket.emit('typing_stop', { roomId })}
             />
           </div>
         </div>
@@ -764,6 +863,14 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         isModerator={isModerator}
         onAssignRole={handleAssignRole}
         onRemoveUser={handleRemoveUser}
+      />
+
+      {/* Modal: Set Username Popover for default/unnamed users joining via link */}
+      <SetUsernameModal
+        isOpen={isNameModalOpen}
+        currentUsername={username}
+        onSave={handleSaveUsername}
+        onClose={() => setIsNameModalOpen(false)}
       />
     </div>
   );

@@ -14,6 +14,7 @@ interface VideoPlayerControlsProps {
   onOpenChangeVideo?: () => void;
   style?: React.CSSProperties;
   className?: string;
+  isAttached?: boolean;
 }
 
 function formatDuration(sec: number): string {
@@ -41,6 +42,7 @@ export function VideoPlayerControls({
   onOpenChangeVideo,
   style,
   className = '',
+  isAttached = false,
 }: VideoPlayerControlsProps) {
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
@@ -191,18 +193,22 @@ export function VideoPlayerControls({
   const effectivePercent = duration > 0 ? (effectiveTime / duration) * 100 : 0;
   const hoverPercent = duration > 0 ? (hoverTime / duration) * 100 : 0;
 
+  const containerClasses = isAttached
+    ? `w-full bg-black/70 backdrop-blur-md rounded-xl p-1.5 sm:p-2 shadow-lg flex items-center justify-between gap-2 border border-white/15 select-none ${className}`
+    : `w-full glass-white-card rounded-2xl p-2.5 sm:p-3 shadow-xl flex items-center justify-between gap-3 sm:gap-4 mt-2 sm:mt-2.5 lg:mt-3 select-none shrink-0 ${className}`;
+
   return (
     <div
       style={style}
-      className={`w-full glass-white-card rounded-2xl p-2.5 sm:p-3 shadow-xl flex items-center justify-between gap-3 sm:gap-4 mt-3 select-none shrink-0 ${className}`}
+      className={containerClasses}
     >
       {/* Left: Play/Pause, Progress, Time, Volume, Speed, Fullscreen */}
-      <div className="flex-1 flex items-center gap-3 sm:gap-4 min-w-0">
+      <div className="flex-1 flex items-center gap-1.5 sm:gap-3 min-w-0">
         {/* Play / Pause button */}
         <button
           onClick={onTogglePlay}
           disabled={!canControl}
-          className="text-white hover:scale-110 active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0 p-1"
+          className="text-white hover:scale-110 active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0 p-0.5 sm:p-1"
           title={canControl ? (isPlaying ? 'Pause' : 'Play') : 'Only Host/Mod can control playback'}
         >
           {isPlaying ? (
@@ -218,7 +224,7 @@ export function VideoPlayerControls({
           className="text-white/80 hover:text-white transition-colors cursor-pointer p-0.5 shrink-0"
           title={isMuted ? 'Unmute' : 'Mute'}
         >
-          {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          {isMuted ? <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
         </button>
 
         {/* YouTube-like Swipeable / Seekable Progress Bar with Tooltip & Thumb */}
@@ -230,7 +236,7 @@ export function VideoPlayerControls({
           onPointerCancel={handlePointerCancel}
           onPointerEnter={() => canControl && setIsHovering(true)}
           onPointerLeave={() => !isScrubbingRef.current && setIsHovering(false)}
-          className={`relative flex items-center h-7 flex-1 touch-none select-none ${
+          className={`relative flex items-center h-6 sm:h-7 flex-1 touch-none select-none ${
             canControl ? 'cursor-pointer group' : 'cursor-not-allowed opacity-80'
           }`}
           title={canControl ? 'Swipe or click to seek video' : 'Playback is controlled by Host and Moderators'}
@@ -275,15 +281,15 @@ export function VideoPlayerControls({
         </div>
 
         {/* Duration timestamp: 00:39 / 11:00 (updates dynamically during swipe) */}
-        <span className="text-[11px] sm:text-xs font-mono font-medium text-white shrink-0 tabular-nums">
+        <span className="text-[10px] sm:text-xs font-mono font-medium text-white shrink-0 tabular-nums">
           <span className="text-white font-bold">{formatDuration(effectiveTime)}</span>
-          <span className="text-white/50 mx-1">/</span>
+          <span className="text-white/50 mx-0.5 sm:mx-1">/</span>
           <span className="text-white/80">{formatDuration(duration)}</span>
         </span>
       </div>
 
       {/* Right: Settings, Fullscreen, and Room Settings button */}
-      <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
         {/* Settings button */}
         <div className="relative">
           <button
@@ -291,7 +297,7 @@ export function VideoPlayerControls({
             className="text-white/80 hover:text-white transition-colors cursor-pointer p-1"
             title="Video settings"
           >
-            <Settings className="w-4 h-4" />
+            <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
 
           {isSettingsOpen && (
@@ -333,18 +339,18 @@ export function VideoPlayerControls({
           className="text-white/80 hover:text-white transition-colors cursor-pointer p-1"
           title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
         >
-          {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+          {isFullscreen ? <Minimize className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Maximize className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
         </button>
 
-        {/* Room Settings / Add Video button matching screenshot */}
+        {/* Room Settings / Add Video button */}
         {onOpenChangeVideo && (
           <button
             onClick={onOpenChangeVideo}
             title="Room settings & video URL"
-            className="glass-white-pill flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white transition-all cursor-pointer shadow-sm"
+            className="glass-white-pill flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-[11px] sm:text-xs font-semibold text-white transition-all cursor-pointer shadow-sm"
           >
             <Sliders className="w-3.5 h-3.5 text-white" />
-            <span className="hidden sm:inline">Room Settings</span>
+            <span className="hidden md:inline">Room Settings</span>
           </button>
         )}
       </div>

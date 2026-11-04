@@ -19,6 +19,8 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
+  LogOut,
+  Check,
 } from 'lucide-react';
 import { ChatMessage, ParticipantData, Role, VideoRequest, QueueItem } from '@/lib/types';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -63,6 +65,14 @@ interface RoomSidebarProps {
   queue?: QueueItem[];
   onRequestVideo?: (url: string) => void;
   onResolveRequest?: (requestId: string, action: 'play_now' | 'queue' | 'reject') => void;
+  onCopyRoomLink?: () => void;
+  copied?: boolean;
+  onLeaveRoom?: () => void;
+  hostName?: string;
+  roomId?: string;
+  typingUsers?: { userId: string; username: string }[];
+  onTypingStart?: () => void;
+  onTypingStop?: () => void;
 }
 
 const QUICK_REACTIONS = ['😡', '😃', '😱', '😆', '❤️'];
@@ -98,9 +108,45 @@ export function RoomSidebar({
   queue = [],
   onRequestVideo,
   onResolveRequest,
+  onCopyRoomLink,
+  copied = false,
+  onLeaveRoom,
+  hostName = 'Host',
+  roomId = '',
+  typingUsers = [],
+  onTypingStart,
+  onTypingStop,
 }: RoomSidebarProps) {
   const [activeTab, setActiveTab] = useState<'chat' | 'participants' | 'requests'>(defaultTab);
   const inputRef = useRef<HTMLInputElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Clean up typing timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    };
+  }, []);
+
+  const handleInputChange = (val: string) => {
+    onChatInputChange(val);
+    if (val.trim()) {
+      onTypingStart?.();
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        onTypingStop?.();
+      }, 2500);
+    } else {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      onTypingStop?.();
+    }
+  };
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    onTypingStop?.();
+    onSendMessage(e);
+  };
 
   // Requests state
   const [requestFilter, setRequestFilter] = useState<'all' | 'pending' | 'accepted' | 'rejected'>('all');
@@ -114,6 +160,17 @@ export function RoomSidebar({
   const myRole = myParticipant?.role || (isHost ? 'host' : 'participant');
   const isMod = isModerator || myRole === 'moderator';
   const canModerate = isHost || isMod;
+
+  const otherTypingUsers = (typingUsers || []).filter(
+    (u) => u.userId !== currentSocketId && (!myParticipant || u.userId !== myParticipant.userId)
+  );
+
+  let typingLabel: string | null = null;
+  if (otherTypingUsers.length === 1) {
+    typingLabel = `${otherTypingUsers[0].username} is typing something`;
+  } else if (otherTypingUsers.length > 1) {
+    typingLabel = `${otherTypingUsers.length} users are typing`;
+  }
 
   const [confirmAction, setConfirmAction] = useState<{
     isOpen: boolean;
@@ -181,21 +238,21 @@ export function RoomSidebar({
 
   return (
     <>
-      <div className="w-full h-full glass-white-card rounded-2xl sm:rounded-3xl p-4 flex flex-col shadow-xl overflow-hidden select-none">
+      <div className="w-full h-full glass-white-card rounded-2xl sm:rounded-3xl p-3 sm:p-4 flex flex-col shadow-xl overflow-hidden select-none">
         {/* 1. Header with Tab Switcher */}
-        <div className="flex items-center justify-between pb-3 border-b border-white/20 shrink-0">
-          <div className="flex items-center gap-1 p-0.5 rounded-full bg-white/10 border border-white/15">
+        <div className="flex items-center justify-between pb-2.5 sm:pb-3 border-b border-white/20 shrink-0">
+          <div className="flex items-center gap-0.5 sm:gap-1 p-0.5 rounded-full bg-white/10 border border-white/15">
             {/* Chat Tab Button */}
             <button
               type="button"
               onClick={() => setActiveTab('chat')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === 'chat'
                   ? 'bg-white/25 text-white shadow-sm'
                   : 'text-white/60 hover:text-white hover:bg-white/10'
               }`}
             >
-              <MessageSquare className="w-3.5 h-3.5" />
+              <MessageSquare className="w-3.5 h-3.5 shrink-0" />
               <span>Chat</span>
             </button>
 
@@ -203,27 +260,30 @@ export function RoomSidebar({
             <button
               type="button"
               onClick={() => setActiveTab('participants')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === 'participants'
                   ? 'bg-white/25 text-white shadow-sm'
                   : 'text-white/60 hover:text-white hover:bg-white/10'
               }`}
             >
-              <Users className="w-3.5 h-3.5" />
-              <span>Participants ({participants.length})</span>
+              <Users className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                <span className="hidden sm:inline">Participants</span>
+                <span className="sm:hidden">People</span> ({participants.length})
+              </span>
             </button>
 
             {/* Requests Tab Button */}
             <button
               type="button"
               onClick={() => setActiveTab('requests')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === 'requests'
                   ? 'bg-white/25 text-white shadow-sm'
                   : 'text-white/60 hover:text-white hover:bg-white/10'
               }`}
             >
-              <Film className="w-3.5 h-3.5" />
+              <Film className="w-3.5 h-3.5 shrink-0" />
               <span>Requests</span>
               {pendingRequestsCount > 0 && (
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 text-white font-mono">
@@ -233,16 +293,77 @@ export function RoomSidebar({
             </button>
           </div>
 
+          {/* Desktop Manage Participants button */}
           {activeTab === 'participants' && onOpenModal && isHost && (
             <button
               type="button"
               onClick={onOpenModal}
               title="Manage participants"
-              className="p-1 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-xs"
+              className="hidden lg:block p-1 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-xs"
             >
               <MoreVertical className="w-4 h-4" />
             </button>
           )}
+
+          {/* Mobile Only: 3 dots in the right corner of room sidebar header */}
+          <div className="lg:hidden flex items-center">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="p-1 rounded-lg text-white/70 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer outline-none flex items-center justify-center"
+                title="Room options"
+              >
+                <MoreVertical className="w-4 h-4 text-white" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                side="bottom"
+                sideOffset={6}
+                className="w-44 rounded-2xl glass-white-card p-1.5 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-100 z-50 text-white outline-none"
+              >
+                {/* 1. Invite Friends */}
+                {onCopyRoomLink && (
+                  <DropdownMenuItem
+                    onClick={onCopyRoomLink}
+                    className="flex items-center gap-2.5 px-3 py-2 text-xs text-white hover:bg-white/15 rounded-xl cursor-pointer transition-colors font-medium outline-none"
+                  >
+                    {copied ? (
+                      <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <Users className="w-4 h-4 text-white shrink-0" />
+                    )}
+                    <span>{copied ? 'Link Copied!' : 'Invite Friends'}</span>
+                  </DropdownMenuItem>
+                )}
+
+                {/* Manage Roster (Host only) */}
+                {isHost && onOpenModal && (
+                  <DropdownMenuItem
+                    onClick={onOpenModal}
+                    className="flex items-center gap-2.5 px-3 py-2 text-xs text-white hover:bg-white/15 rounded-xl cursor-pointer transition-colors font-medium outline-none"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-white shrink-0" />
+                    <span>Manage Roster</span>
+                  </DropdownMenuItem>
+                )}
+
+                {(onCopyRoomLink || (isHost && onOpenModal)) && onLeaveRoom && (
+                  <DropdownMenuSeparator className="my-1 -mx-1 h-px bg-white/20" />
+                )}
+
+                {/* 2. Leave Room */}
+                {onLeaveRoom && (
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={onLeaveRoom}
+                    className="flex items-center gap-2.5 px-3 py-2 text-xs text-rose-300 hover:text-white hover:bg-rose-500/25 rounded-xl cursor-pointer transition-colors font-medium outline-none"
+                  >
+                    <LogOut className="w-4 h-4 text-rose-300 shrink-0" />
+                    <span>Leave Room</span>
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
 
         {/* 2. Body View: Chat Tab */}
@@ -251,8 +372,8 @@ export function RoomSidebar({
             {/* Scrollable Messages Area */}
             <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pt-3 pr-1">
               {messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-white/60 text-xs py-12">
-                  <MessageSquare className="w-8 h-8 stroke-1 text-white/40 mb-2" />
+                <div className="h-full flex flex-col items-center justify-center text-white/60 text-xs py-4 sm:py-8">
+                  <MessageSquare className="w-7 h-7 sm:w-8 sm:h-8 stroke-1 text-white/40 mb-1.5" />
                   <p className="font-semibold text-white/90 text-xs">No messages yet</p>
                   <p className="text-[11px] text-white/50 text-center max-w-[200px] mt-0.5">
                     Start the conversation!
@@ -301,7 +422,7 @@ export function RoomSidebar({
 
             {/* Quick Reactions Strip */}
             {onSendReaction && (
-              <div className="pt-2 pb-1 flex justify-center shrink-0">
+              <div className="pt-1.5 pb-1 flex justify-center shrink-0">
                 <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 border border-white/15 backdrop-blur-md shadow-sm">
                   {QUICK_REACTIONS.map((emoji) => (
                     <button
@@ -318,16 +439,28 @@ export function RoomSidebar({
               </div>
             )}
 
+            {/* Typing Indicator */}
+            {typingLabel && (
+              <div className="flex items-center gap-1.5 px-3 py-0.5 text-[11px] text-white/70 animate-in fade-in duration-150 shrink-0">
+                <span className="flex items-center gap-0.5">
+                  <span className="w-1 h-1 rounded-full bg-white/70 animate-bounce [animation-delay:-0.3s]" />
+                  <span className="w-1 h-1 rounded-full bg-white/70 animate-bounce [animation-delay:-0.15s]" />
+                  <span className="w-1 h-1 rounded-full bg-white/70 animate-bounce" />
+                </span>
+                <span className="truncate italic">{typingLabel}</span>
+              </div>
+            )}
+
             {/* Bottom Pill Input with Coral Send Button */}
             <form
-              onSubmit={onSendMessage}
-              className="relative flex items-center glass-white-input rounded-full px-4 py-1.5 mt-1 shadow-inner shrink-0"
+              onSubmit={handleFormSubmit}
+              className="relative flex items-center glass-white-input rounded-full px-3.5 sm:px-4 py-1.5 mt-0.5 shadow-inner shrink-0"
             >
               <input
                 ref={inputRef}
                 type="text"
                 value={chatInput}
-                onChange={(e) => onChatInputChange(e.target.value)}
+                onChange={(e) => handleInputChange(e.target.value)}
                 placeholder="Type comment..."
                 maxLength={250}
                 className="flex-1 bg-transparent text-xs text-white placeholder-white/60 outline-none pr-9 py-1 font-medium"
@@ -587,14 +720,14 @@ export function RoomSidebar({
                             </span>
                           </div>
 
-                          <div className="flex items-center gap-2 pt-1">
+                          <div className="flex items-center gap-1.5 sm:gap-2 pt-1 flex-wrap">
                             {/* "Play now" button (Peach) */}
                             <button
                               type="button"
                               onClick={() => onResolveRequest?.(req.requestId, 'play_now')}
-                              className="px-3.5 py-1.5 rounded-full text-xs font-bold text-white bg-[#F05A65] hover:bg-[#FF7180] active:scale-95 transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                              className="px-3 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-bold text-white bg-[#F05A65] hover:bg-[#FF7180] active:scale-95 transition-all shadow-md cursor-pointer flex items-center gap-1 sm:gap-1.5"
                             >
-                              <Play className="w-3.5 h-3.5 fill-white" />
+                              <Play className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-white" />
                               <span>Play now</span>
                             </button>
 
@@ -602,7 +735,7 @@ export function RoomSidebar({
                             <button
                               type="button"
                               onClick={() => onResolveRequest?.(req.requestId, 'queue')}
-                              className="glass-white-pill px-3 py-1.5 rounded-full text-xs font-semibold text-white hover:bg-white/25 active:scale-95 transition-all cursor-pointer flex items-center gap-1.5"
+                              className="glass-white-pill px-2.5 sm:px-3 py-1.5 rounded-full text-[11px] sm:text-xs font-semibold text-white hover:bg-white/25 active:scale-95 transition-all cursor-pointer flex items-center gap-1 sm:gap-1.5"
                             >
                               <ListPlus className="w-3.5 h-3.5" />
                               <span>Add to queue</span>
@@ -612,7 +745,7 @@ export function RoomSidebar({
                             <button
                               type="button"
                               onClick={() => onResolveRequest?.(req.requestId, 'reject')}
-                              className="px-2.5 py-1.5 rounded-full text-xs font-semibold text-rose-300 hover:text-white hover:bg-rose-500/25 transition-colors cursor-pointer ml-auto"
+                              className="px-2 sm:px-2.5 py-1.5 rounded-full text-[11px] sm:text-xs font-semibold text-rose-300 hover:text-white hover:bg-rose-500/25 transition-colors cursor-pointer ml-auto"
                             >
                               Reject
                             </button>
@@ -734,6 +867,13 @@ export function RoomSidebar({
             )}
           </div>
         )}
+
+        {/* Mobile Only: "user's watch party" as a text "TEXT ONLY" in the bottom, faded, minimal space */}
+        <div className="lg:hidden text-center pt-1.5 shrink-0 select-none pointer-events-none">
+          <p className="text-[11px] text-white/40 tracking-tight truncate">
+            {hostName}&apos;s Watch Party
+          </p>
+        </div>
       </div>
 
       {/* Alert Dialog matching Frosted Glass Design */}

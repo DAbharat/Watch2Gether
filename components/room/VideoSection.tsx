@@ -65,8 +65,8 @@ export function VideoSection({
     : undefined;
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-between min-h-0 min-w-0">
-      {/* 1. YouTube Video Container matching screenshot */}
+    <div className="w-full h-full flex flex-col items-center justify-between min-h-0 min-w-0 max-lg:justify-center">
+      {/* 1. YouTube Video Container */}
       <div className="flex-1 min-h-0 w-full flex items-center justify-center overflow-hidden">
         <div
           ref={videoContainerRef}
@@ -87,10 +87,24 @@ export function VideoSection({
             onLocalPause={onLocalPause}
             onLocalSeek={onLocalSeek}
           />
+
+          {/* MOBILE ONLY: Progress bar / controls appended within the video itself */}
+          <div className="lg:hidden absolute bottom-2 left-2 right-2 z-30 pointer-events-auto">
+            <VideoPlayerControls
+              playerRef={playerRef}
+              videoContainerRef={videoContainerRef}
+              isPlaying={isPlaying}
+              canControl={canControl}
+              onTogglePlay={onTogglePlay}
+              onSeek={onLocalSeek}
+              onOpenChangeVideo={onOpenChangeVideo}
+              isAttached={true}
+            />
+          </div>
         </div>
       </div>
 
-      {/* 2. Controls Bar directly below video with Play/Pause, Duration, Progress Bar, and Room Settings */}
+      {/* 2. DESKTOP ONLY: Controls Bar directly below video in separate card (100% UNTOUCHED ORIGINAL DESKTOP DESIGN) */}
       <VideoPlayerControls
         playerRef={playerRef}
         videoContainerRef={videoContainerRef}
@@ -100,6 +114,7 @@ export function VideoSection({
         onSeek={onLocalSeek}
         onOpenChangeVideo={onOpenChangeVideo}
         style={elementStyle}
+        className="hidden lg:flex"
       />
     </div>
   );

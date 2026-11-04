@@ -36,11 +36,6 @@ export function RoomHeader({
       <div className="w-full glass-white-card rounded-2xl sm:rounded-3xl p-3 sm:p-3.5 flex items-center justify-between gap-4 shadow-xl shrink-0">
         {/* Left: Party Title + Meta */}
         <div className="flex items-center gap-3 sm:gap-3.5 min-w-0">
-          {/* Magenta / Pink Play Gradient Square matching screenshot */}
-          {/* <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-fuchsia-600 via-pink-600 to-[#F05A65] flex items-center justify-center shadow-lg shadow-pink-500/25 shrink-0">
-            <Play className="w-5 h-5 fill-white text-white ml-0.5" />
-          </div> */}
-
           <div className="flex flex-col min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-sm sm:text-base font-bold text-white tracking-tight truncate leading-snug">
