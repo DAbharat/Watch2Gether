@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { getSocket } from '@/lib/socket';
 import { YouTubePlayerRef } from '@/components/YouTubePlayer';
 import { extractYouTubeId } from '@/lib/youtube';
-import { Role, ParticipantData, RoomState, ChatMessage, ReactionData } from '@/lib/types';
+import { Role, ParticipantData, RoomState, ChatMessage, ReactionData, VideoRequest, QueueItem } from '@/lib/types';
 import { toast } from '@/components/ui/toast';
 import { AlertCircle } from 'lucide-react';
 
@@ -58,6 +58,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState<string>('');
   const [floatingReactions, setFloatingReactions] = useState<ReactionData[]>([]);
+  const [requests, setRequests] = useState<VideoRequest[]>([]);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   // 1. Clock Offset (NTP Synchronization): serverTime = Date.now() + clientServerOffset
@@ -390,6 +392,48 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       socket.disconnect();
     });
 
+    socket.on('requests_sync', ({ requests: syncedRequests }: { requests: VideoRequest[] }) => {
+      setRequests(syncedRequests || []);
+    });
+
+    socket.on('request_created', ({ request }: { request: VideoRequest }) => {
+      setRequests((prev) => {
+        const exists = prev.some((r) => r.requestId === request.requestId);
+        if (exists) return prev;
+        return [request, ...prev];
+      });
+      if (canControlRef.current) {
+        toast.add({
+          title: 'New Video Request',
+          description: `${request.username} requested a video.`,
+          type: 'info',
+        });
+      }
+    });
+
+    socket.on('request_updated', ({ request, message }: { request: VideoRequest; message?: string }) => {
+      setRequests((prev) => prev.map((r) => (r.requestId === request.requestId ? request : r)));
+      if (message) {
+        toast.add({
+          title: 'Video Request',
+          description: message,
+          type: request.status === 'accepted' ? 'success' : 'info',
+        });
+      }
+    });
+
+    socket.on('queue_updated', ({ queue: updatedQueue }: { queue: QueueItem[] }) => {
+      setQueue(updatedQueue || []);
+    });
+
+    socket.on('request_notification', ({ message, type }: { message: string; type: string }) => {
+      toast.add({
+        title: 'Video Request',
+        description: message,
+        type: type === 'success' ? 'success' : 'info',
+      });
+    });
+
     // Discord State Reconciliation Engine (Every 800ms)
     // Silently matches playhead using variable playbackRate to eliminate micro-seeks and audio stuttering
     const reconcileInterval = setInterval(() => {
@@ -484,6 +528,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       socket.off('reaction');
       socket.off('role_changed');
       socket.off('kicked');
+      socket.off('requests_sync');
+      socket.off('request_created');
+      socket.off('request_updated');
+      socket.off('queue_updated');
+      socket.off('request_notification');
     };
   }, [roomId]);
 
@@ -550,6 +599,33 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const handleRemoveUser = (targetId: string) => {
     socket.emit('kick_user', { roomId, userId: targetId, targetSocketId: targetId });
+  };
+
+  const handleRequestVideo = (videoUrl: string) => {
+    socket.emit('request_video', {
+      roomId,
+      participantToken,
+      videoUrl,
+    });
+  };
+
+  const handleResolveRequest = (requestId: string, action: 'play_now' | 'queue' | 'reject') => {
+    socket.emit('resolve_request', {
+      roomId,
+      participantToken,
+      requestId,
+      action,
+    });
+  };
+
+  const handleVideoEnded = () => {
+    if (canControlRef.current) {
+      socket.emit('video_ended', {
+        roomId,
+        videoId,
+        participantToken,
+      });
+    }
   };
 
   if (kickedMessage) {
@@ -630,14 +706,21 @@ export default function RoomClient({ roomId }: RoomClientProps) {
                 socket.emit('pause', { roomId, currentTime: time, timestamp: now });
               }}
               onLocalSeek={(time) => {
+                timelineRef.current.anchorPosition = time;
+                timelineRef.current.anchorServerTime = getServerNow();
+                if (playerRef.current) {
+                  playerRef.current.seekTo(time);
+                  playerRef.current.setPlaybackRate(1);
+                }
                 socket.emit('seek', { roomId, time });
               }}
               onTogglePlay={handleTogglePlay}
               onOpenChangeVideo={() => setIsChangeVideoOpen(true)}
+              onEnded={handleVideoEnded}
             />
           </div>
 
-          {/* Right Column: Chat & Participants Sidebar starting below Header */}
+          {/* Right Column: Chat, Participants & Requests Sidebar */}
           <div className="w-full lg:w-[340px] xl:w-[365px] 2xl:w-[380px] shrink-0 h-full min-h-0 flex flex-col overflow-hidden">
             <RoomSidebar
               messages={messages}
@@ -654,6 +737,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               onRemoveUser={handleRemoveUser}
               onOpenModal={() => setIsParticipantsOpen(true)}
               chatBottomRef={chatBottomRef}
+              requests={requests}
+              queue={queue}
+              onRequestVideo={handleRequestVideo}
+              onResolveRequest={handleResolveRequest}
             />
           </div>
         </div>

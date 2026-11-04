@@ -10,11 +10,21 @@ import {
   Eye,
   Crown,
   UserMinus,
+  Film,
+  Plus,
+  Play,
+  ListPlus,
+  Link as LinkIcon,
+  Inbox,
+  Clock,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react';
-import { ChatMessage, ParticipantData, Role } from '@/lib/types';
+import { ChatMessage, ParticipantData, Role, VideoRequest, QueueItem } from '@/lib/types';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { getAvatarForUser } from '@/lib/avatars';
 import { RoleBadge } from '@/lib/roles';
+import { validateYouTubeUrl } from '@/lib/youtubeValidator';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -48,7 +58,11 @@ interface RoomSidebarProps {
   onRemoveUser?: (userId: string) => void;
   onOpenModal?: () => void;
   chatBottomRef: React.RefObject<HTMLDivElement | null>;
-  defaultTab?: 'chat' | 'participants';
+  defaultTab?: 'chat' | 'participants' | 'requests';
+  requests?: VideoRequest[];
+  queue?: QueueItem[];
+  onRequestVideo?: (url: string) => void;
+  onResolveRequest?: (requestId: string, action: 'play_now' | 'queue' | 'reject') => void;
 }
 
 const QUICK_REACTIONS = ['😡', '😃', '😱', '😆', '❤️'];
@@ -80,9 +94,19 @@ export function RoomSidebar({
   onOpenModal,
   chatBottomRef,
   defaultTab = 'chat',
+  requests = [],
+  queue = [],
+  onRequestVideo,
+  onResolveRequest,
 }: RoomSidebarProps) {
-  const [activeTab, setActiveTab] = useState<'chat' | 'participants'>(defaultTab);
+  const [activeTab, setActiveTab] = useState<'chat' | 'participants' | 'requests'>(defaultTab);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Requests state
+  const [requestFilter, setRequestFilter] = useState<'all' | 'pending' | 'accepted' | 'rejected'>('all');
+  const [isRequestFormOpen, setIsRequestFormOpen] = useState<boolean>(false);
+  const [requestUrlInput, setRequestUrlInput] = useState<string>('');
+  const [requestError, setRequestError] = useState<string | null>(null);
 
   const myParticipant = participants.find(
     (p) => (currentSocketId && p.socketId === currentSocketId) || (currentSocketId && p.userId === currentSocketId)
@@ -129,14 +153,41 @@ export function RoomSidebar({
     setConfirmAction({ isOpen: false, type: 'promote_mod', targetUser: null });
   };
 
+  // Submit a video request with client-side validation
+  const handleSubmitRequest = (e: React.FormEvent) => {
+    e.preventDefault();
+    setRequestError(null);
+
+    const validation = validateYouTubeUrl(requestUrlInput);
+    if (!validation.valid || !validation.canonicalUrl) {
+      setRequestError(validation.error || 'Please enter a valid https:// YouTube link.');
+      return;
+    }
+
+    if (onRequestVideo) {
+      onRequestVideo(validation.canonicalUrl);
+    }
+    setRequestUrlInput('');
+    setIsRequestFormOpen(false);
+  };
+
+  // Filter requests
+  const pendingRequestsCount = requests.filter((r) => r.status === 'pending').length;
+
+  const filteredRequests = requests.filter((r) => {
+    if (requestFilter === 'all') return true;
+    return r.status === requestFilter;
+  });
+
   return (
     <>
       <div className="w-full h-full glass-white-card rounded-2xl sm:rounded-3xl p-4 flex flex-col shadow-xl overflow-hidden select-none">
         {/* 1. Header with Tab Switcher */}
         <div className="flex items-center justify-between pb-3 border-b border-white/20 shrink-0">
-          <div className="flex items-center gap-1.5 p-1 rounded-full bg-white/10 border border-white/15">
+          <div className="flex items-center gap-1 p-0.5 rounded-full bg-white/10 border border-white/15">
             {/* Chat Tab Button */}
             <button
+              type="button"
               onClick={() => setActiveTab('chat')}
               className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === 'chat'
@@ -150,6 +201,7 @@ export function RoomSidebar({
 
             {/* Participants Tab Button */}
             <button
+              type="button"
               onClick={() => setActiveTab('participants')}
               className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === 'participants'
@@ -158,12 +210,32 @@ export function RoomSidebar({
               }`}
             >
               <Users className="w-3.5 h-3.5" />
-              <span>People ({participants.length})</span>
+              <span>Participants ({participants.length})</span>
+            </button>
+
+            {/* Requests Tab Button */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('requests')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                activeTab === 'requests'
+                  ? 'bg-white/25 text-white shadow-sm'
+                  : 'text-white/60 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <Film className="w-3.5 h-3.5" />
+              <span>Requests</span>
+              {pendingRequestsCount > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 text-white font-mono">
+                  {pendingRequestsCount}
+                </span>
+              )}
             </button>
           </div>
 
           {activeTab === 'participants' && onOpenModal && isHost && (
             <button
+              type="button"
               onClick={onOpenModal}
               title="Manage participants"
               className="p-1 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-xs"
@@ -173,7 +245,7 @@ export function RoomSidebar({
           )}
         </div>
 
-        {/* 2. Body View: Chat Tab matching Image 1 */}
+        {/* 2. Body View: Chat Tab */}
         {activeTab === 'chat' && (
           <div className="flex-1 min-h-0 flex flex-col justify-between overflow-hidden">
             {/* Scrollable Messages Area */}
@@ -188,42 +260,35 @@ export function RoomSidebar({
                 </div>
               ) : (
                 messages.map((msg) => {
-                  const isHostUser = msg.role === 'host';
-                  const isModUser = msg.role === 'moderator';
+                  const isMe = msg.userId === currentSocketId;
+                  const avatarUrl = getAvatarForUser(
+                    { userId: msg.userId, username: msg.username, avatar: msg.avatar },
+                    participants
+                  );
+                  const timeString = formatMessageTime(msg.timestamp);
 
                   return (
-                    <div key={msg.id} className="flex gap-2.5 items-start text-xs group">
-                      <Avatar size="sm" className="w-7 h-7 shrink-0 border border-white/20 mt-0.5 shadow">
-                        <AvatarImage
-                          src={msg.avatar || '/avatars/01.png'}
-                          alt={msg.username}
-                          className="object-cover"
-                        />
-                        <AvatarFallback className="bg-white/15 text-white font-semibold text-[10px]">
-                          {msg.username.charAt(0).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
+                    <div key={msg.id} className="flex items-start gap-2.5">
+                      <div className="relative shrink-0 mt-0.5">
+                        <Avatar size="sm" className="w-8 h-8 rounded-full border border-white/20 shadow">
+                          <AvatarImage src={avatarUrl} alt={msg.username} className="object-cover" />
+                          <AvatarFallback className="bg-white/15 text-white font-semibold text-xs">
+                            {msg.username.charAt(0).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-black/80" />
+                      </div>
 
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <span className="font-semibold text-white truncate max-w-[120px] text-xs">
-                            {msg.username}
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-xs font-semibold text-white truncate">
+                            {isMe ? 'You' : msg.username}
                           </span>
-                          {isHostUser && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-white/15 text-white border border-white/25 font-semibold shrink-0">
-                              Host
-                            </span>
-                          )}
-                          {isModUser && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-200 border border-blue-400/30 font-semibold shrink-0">
-                              Mod
-                            </span>
-                          )}
-                          <span className="text-[10px] text-white/40 ml-auto shrink-0 font-mono">
-                            {formatMessageTime(msg.timestamp)}
+                          <span className="text-[10px] text-white/60 font-normal shrink-0">
+                            {timeString}
                           </span>
                         </div>
-                        <p className="text-white/90 text-xs break-words leading-relaxed">
+                        <p className="text-xs text-white/95 leading-relaxed font-normal mt-0.5 break-words">
                           {msg.text}
                         </p>
                       </div>
@@ -234,9 +299,9 @@ export function RoomSidebar({
               <div ref={chatBottomRef} />
             </div>
 
-            {/* Quick Reactions Bar matching Image 1 */}
+            {/* Quick Reactions Strip */}
             {onSendReaction && (
-              <div className="flex items-center justify-end pt-2 pb-1 shrink-0">
+              <div className="pt-2 pb-1 flex justify-center shrink-0">
                 <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 border border-white/15 backdrop-blur-md shadow-sm">
                   {QUICK_REACTIONS.map((emoji) => (
                     <button
@@ -282,7 +347,7 @@ export function RoomSidebar({
         {/* 3. Body View: Participants Tab */}
         {activeTab === 'participants' && (
           <div className="flex-1 min-h-0 flex flex-col justify-between overflow-hidden">
-            {/* Scrollable Participants Roster matching Design Reference */}
+            {/* Scrollable Participants Roster */}
             <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pt-2 pr-1">
               {participants.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-white/60 text-xs py-12">
@@ -308,7 +373,6 @@ export function RoomSidebar({
                               {p.username.charAt(0).toUpperCase()}
                             </AvatarFallback>
                           </Avatar>
-                          {/* Online indicator dot */}
                           <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-black/80" />
                         </div>
 
@@ -324,7 +388,7 @@ export function RoomSidebar({
                         </div>
                       </div>
 
-                      {/* Right: Frosted RoleBadge Pill + Optional Three Dots (only visible in host and mod view) */}
+                      {/* Right: Frosted RoleBadge Pill + Optional Three Dots */}
                       <div className="flex items-center gap-1.5 shrink-0 ml-auto">
                         <RoleBadge role={p.role} className="w-20 justify-center text-[11px]" size={12} />
 
@@ -338,8 +402,8 @@ export function RoomSidebar({
                                 <DropdownMenuContent
                                   align="end"
                                   side="bottom"
-                                  sideOffset={4}
-                                  className="w-44 rounded-2xl glass-white-card p-1.5 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-100 z-50 border border-white/30 backdrop-blur-2xl text-white outline-none"
+                                  sideOffset={6}
+                                  className="w-48 rounded-2xl glass-white-card p-1.5 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-100 z-50 text-white outline-none"
                                 >
                                   {isHost ? (
                                     <>
@@ -353,10 +417,10 @@ export function RoomSidebar({
                                               targetUser: p,
                                             })
                                           }
-                                          className="flex items-center gap-2.5 px-3 py-2 text-xs text-white/90 hover:text-white hover:bg-white/15 rounded-xl cursor-pointer transition-colors font-medium outline-none"
+                                          className="flex items-center gap-2.5 px-3 py-2 text-xs text-white hover:bg-white/15 rounded-xl cursor-pointer transition-colors font-medium outline-none"
                                         >
-                                          <Eye className="w-3.5 h-3.5 text-white/80 shrink-0" strokeWidth={1.75} />
-                                          <span>Demote to Viewer</span>
+                                          <Eye className="w-4 h-4 text-white shrink-0" strokeWidth={1.75} />
+                                          <span className="text-white">Demote to Viewer</span>
                                         </DropdownMenuItem>
                                       ) : (
                                         <DropdownMenuItem
@@ -367,10 +431,10 @@ export function RoomSidebar({
                                               targetUser: p,
                                             })
                                           }
-                                          className="flex items-center gap-2.5 px-3 py-2 text-xs text-white/90 hover:text-white hover:bg-white/15 rounded-xl cursor-pointer transition-colors font-medium outline-none"
+                                          className="flex items-center gap-2.5 px-3 py-2 text-xs text-white hover:bg-white/15 rounded-xl cursor-pointer transition-colors font-medium outline-none"
                                         >
-                                          <ShieldCheck className="w-3.5 h-3.5 text-white/80 shrink-0" strokeWidth={1.75} />
-                                          <span>Make Moderator</span>
+                                          <ShieldCheck className="w-4 h-4 text-white shrink-0" strokeWidth={1.75} />
+                                          <span className="text-white">Make Moderator</span>
                                         </DropdownMenuItem>
                                       )}
 
@@ -383,13 +447,13 @@ export function RoomSidebar({
                                             targetUser: p,
                                           })
                                         }
-                                        className="flex items-center gap-2.5 px-3 py-2 text-xs text-amber-200 hover:text-amber-100 hover:bg-white/15 rounded-xl cursor-pointer transition-colors font-medium outline-none"
+                                        className="flex items-center gap-2.5 px-3 py-2 text-xs text-white hover:bg-white/15 rounded-xl cursor-pointer transition-colors font-medium outline-none"
                                       >
-                                        <Crown className="w-3.5 h-3.5 text-amber-300 shrink-0" strokeWidth={1.75} />
-                                        <span>Promote to Host</span>
+                                        <Crown className="w-4 h-4 text-white shrink-0" strokeWidth={1.75} />
+                                        <span className="text-white">Promote to Host</span>
                                       </DropdownMenuItem>
 
-                                      <DropdownMenuSeparator className="my-1 -mx-1 h-px bg-white/15" />
+                                      <DropdownMenuSeparator className="my-1 -mx-1 h-px bg-white/20" />
 
                                       {/* 3. Remove Member */}
                                       <DropdownMenuItem
@@ -401,9 +465,9 @@ export function RoomSidebar({
                                             targetUser: p,
                                           })
                                         }
-                                        className="flex items-center gap-2.5 px-3 py-2 text-xs text-red-200 hover:text-white hover:bg-red-500/30 rounded-xl cursor-pointer transition-colors font-medium outline-none"
+                                        className="flex items-center gap-2.5 px-3 py-2 text-xs text-rose-300 hover:text-white hover:bg-rose-500/25 rounded-xl cursor-pointer transition-colors font-medium outline-none"
                                       >
-                                        <UserMinus className="w-3.5 h-3.5 text-red-300 shrink-0" strokeWidth={1.75} />
+                                        <UserMinus className="w-4 h-4 text-rose-400 shrink-0" strokeWidth={1.75} />
                                         <span>Remove Member</span>
                                       </DropdownMenuItem>
                                     </>
@@ -418,9 +482,9 @@ export function RoomSidebar({
                                           targetUser: p,
                                         })
                                       }
-                                      className="flex items-center gap-2.5 px-3 py-2 text-xs text-red-200 hover:text-white hover:bg-red-500/30 rounded-xl cursor-pointer transition-colors font-medium outline-none"
+                                      className="flex items-center gap-2.5 px-3 py-2 text-xs text-rose-300 hover:text-white hover:bg-rose-500/25 rounded-xl cursor-pointer transition-colors font-medium outline-none"
                                     >
-                                      <UserMinus className="w-3.5 h-3.5 text-red-300 shrink-0" strokeWidth={1.75} />
+                                      <UserMinus className="w-4 h-4 text-rose-400 shrink-0" strokeWidth={1.75} />
                                       <span>Remove Member</span>
                                     </DropdownMenuItem>
                                   ) : (
@@ -452,6 +516,220 @@ export function RoomSidebar({
                 >
                   <span>Manage Permissions & Roster</span>
                 </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 4. Body View: Requests Tab */}
+        {activeTab === 'requests' && (
+          <div className="flex-1 min-h-0 flex flex-col justify-between overflow-hidden">
+            {/* Filter Chips Bar */}
+            <div className="flex items-center justify-between pb-2 pt-1 border-b border-white/10 shrink-0">
+              <div className="flex items-center gap-1 p-0.5 rounded-full bg-white/10 border border-white/15 overflow-x-auto scrollbar-none">
+                {(['all', 'pending', 'accepted', 'rejected'] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setRequestFilter(filter)}
+                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer capitalize ${
+                      requestFilter === filter
+                        ? 'bg-white/25 text-white shadow-sm'
+                        : 'text-white/60 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    {filter}
+                  </button>
+                ))}
+              </div>
+
+              {/* Queue badge indicator */}
+              {queue.length > 0 && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/15 text-white/90 border border-white/20">
+                  Queue: {queue.length}/20
+                </span>
+              )}
+            </div>
+
+            {/* Requests List Area */}
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5 py-2.5 pr-1">
+              {filteredRequests.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-white/60 text-xs py-12">
+                  <Inbox className="w-8 h-8 stroke-1 text-white/40 mb-2" />
+                  <p className="font-semibold text-white/90 text-xs">
+                    {canModerate ? 'No requests from users right now.' : "You haven't made any requests yet."}
+                  </p>
+                  <p className="text-[11px] text-white/50 text-center max-w-[200px] mt-0.5">
+                    {canModerate
+                      ? 'Viewer requests will appear here for approval.'
+                      : 'Suggest a video to the host below!'}
+                  </p>
+                </div>
+              ) : (
+                filteredRequests.map((req) => {
+                  const canonicalUrl = `https://www.youtube.com/watch?v=${req.videoId}`;
+                  const isPending = req.status === 'pending';
+
+                  return (
+                    <div
+                      key={req.requestId}
+                      className="p-3 rounded-2xl glass-white-card border border-white/20 shadow-sm space-y-2 text-left"
+                    >
+                      {/* Host / Moderator view for Pending Request */}
+                      {canModerate && isPending ? (
+                        <>
+                          <div className="text-xs text-white/90 leading-relaxed">
+                            <span>User </span>
+                            <span className="font-bold text-white">{req.username}</span>
+                            <span> made a request to play this video: </span>
+                            <span className="font-mono text-white/90 break-all underline decoration-white/30">
+                              {canonicalUrl}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-1">
+                            {/* "Play now" button (Peach) */}
+                            <button
+                              type="button"
+                              onClick={() => onResolveRequest?.(req.requestId, 'play_now')}
+                              className="px-3.5 py-1.5 rounded-full text-xs font-bold text-white bg-[#F05A65] hover:bg-[#FF7180] active:scale-95 transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                            >
+                              <Play className="w-3.5 h-3.5 fill-white" />
+                              <span>Play now</span>
+                            </button>
+
+                            {/* "Add to queue" button (Secondary) */}
+                            <button
+                              type="button"
+                              onClick={() => onResolveRequest?.(req.requestId, 'queue')}
+                              className="glass-white-pill px-3 py-1.5 rounded-full text-xs font-semibold text-white hover:bg-white/25 active:scale-95 transition-all cursor-pointer flex items-center gap-1.5"
+                            >
+                              <ListPlus className="w-3.5 h-3.5" />
+                              <span>Add to queue</span>
+                            </button>
+
+                            {/* Reject button (Secondary / Destructive) */}
+                            <button
+                              type="button"
+                              onClick={() => onResolveRequest?.(req.requestId, 'reject')}
+                              className="px-2.5 py-1.5 rounded-full text-xs font-semibold text-rose-300 hover:text-white hover:bg-rose-500/25 transition-colors cursor-pointer ml-auto"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        /* Viewer View or Handled History item */
+                        <>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-white truncate">
+                              {canModerate ? req.username : 'Your Request'}
+                            </span>
+
+                            {/* Status label: Pending, Accepted, or Rejected */}
+                            {req.status === 'pending' && (
+                              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-500/30 font-medium shrink-0">
+                                <Clock className="w-3 h-3" />
+                                <span>Pending</span>
+                              </span>
+                            )}
+                            {req.status === 'accepted' && (
+                              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-500/30 font-medium shrink-0">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>
+                                  {req.action === 'queue' ? 'Added to queue' : 'Accepted'}
+                                </span>
+                              </span>
+                            )}
+                            {req.status === 'rejected' && (
+                              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-200 border border-rose-500/30 font-medium shrink-0">
+                                <XCircle className="w-3 h-3" />
+                                <span>Rejected</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Canonical video link rendered strictly as plain text */}
+                          <div className="text-xs text-white/80 font-mono break-all py-0.5">
+                            {canonicalUrl}
+                          </div>
+
+                          <div className="flex items-center justify-between text-[10px] text-white/50 pt-0.5">
+                            <span>{new Date(req.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            {req.resolvedBy && (
+                              <span>Reviewed by {req.resolvedBy}</span>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Viewer: Make a request button and expandable input form */}
+            {!canModerate && (
+              <div className="pt-2 border-t border-white/15 shrink-0">
+                {!isRequestFormOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsRequestFormOpen(true)}
+                    className="w-full py-2.5 rounded-full text-xs font-bold text-white bg-[#F05A65] hover:bg-[#FF7180] active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-red-500/20"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Make a request</span>
+                  </button>
+                ) : (
+                  <form onSubmit={handleSubmitRequest} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-white/90">
+                        Paste YouTube Video URL
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsRequestFormOpen(false);
+                          setRequestUrlInput('');
+                          setRequestError(null);
+                        }}
+                        className="text-[11px] text-white/60 hover:text-white cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    <div className="relative flex items-center glass-white-input rounded-full px-3 py-1 shadow-inner">
+                      <LinkIcon className="w-3.5 h-3.5 text-white/60 shrink-0 ml-1 mr-2" />
+                      <input
+                        type="text"
+                        value={requestUrlInput}
+                        onChange={(e) => {
+                          setRequestUrlInput(e.target.value);
+                          setRequestError(null);
+                        }}
+                        placeholder="https://www.youtube.com/watch?v=..."
+                        maxLength={200}
+                        autoFocus
+                        className="flex-1 bg-transparent text-xs text-white placeholder-white/50 outline-none pr-8 py-1 font-medium"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!requestUrlInput.trim()}
+                        className="w-7 h-7 rounded-full bg-[#F05A65] hover:bg-[#FF7180] disabled:opacity-40 flex items-center justify-center text-white transition-all cursor-pointer shadow-md shrink-0"
+                        title="Send request"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {requestError && (
+                      <p className="text-[11px] text-rose-300 font-medium px-1">
+                        {requestError}
+                      </p>
+                    )}
+                  </form>
+                )}
               </div>
             )}
           </div>

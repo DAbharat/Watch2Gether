@@ -37,3 +37,22 @@ export interface ReactionData {
   emoji: string;
   username: string;
 }
+
+export interface VideoRequest {
+  requestId: string;
+  userId: string;
+  username: string;
+  videoId: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: number;
+  action?: 'play_now' | 'queue' | 'reject';
+  resolvedAt?: number;
+  resolvedBy?: string;
+}
+
+export interface QueueItem {
+  videoId: string;
+  requestedBy: string;
+  requestedByUsername: string;
+  approvedAt: number;
+}

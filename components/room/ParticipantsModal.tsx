@@ -37,7 +37,13 @@ export function ParticipantsModal({
   onTransferHost,
   onRemoveUser,
 }: ParticipantsModalProps) {
-  const [activeMenuUserId, setActiveMenuUserId] = useState<string | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<{
+    user: ParticipantData;
+    top?: number;
+    bottom?: number;
+    right: number;
+  } | null>(null);
+
   const [dialogState, setDialogState] = useState<DialogState>({
     isOpen: false,
     type: 'role',
@@ -51,10 +57,25 @@ export function ParticipantsModal({
   const isMod = isModerator || myRole === 'moderator';
   const canModerate = isHost || isMod;
 
+  // Close menus on scroll, resize, or escape
+  useEffect(() => {
+    const handleScrollOrResize = () => {
+      setMenuAnchor(null);
+    };
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('resize', handleScrollOrResize);
+    return () => {
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('resize', handleScrollOrResize);
+    };
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (dialogState.isOpen) {
+        if (menuAnchor) {
+          setMenuAnchor(null);
+        } else if (dialogState.isOpen) {
           setDialogState({ isOpen: false, type: 'role', targetUser: null });
         } else if (isOpen) {
           onClose();
@@ -63,7 +84,7 @@ export function ParticipantsModal({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, dialogState.isOpen, onClose]);
+  }, [isOpen, dialogState.isOpen, menuAnchor, onClose]);
 
   if (!isOpen) return null;
 
@@ -148,7 +169,8 @@ export function ParticipantsModal({
           ) : (
             participants.map((p) => {
               const isMe = p.socketId === currentSocketId || p.userId === currentSocketId;
-              const isMenuOpen = activeMenuUserId === (p.userId || p.socketId);
+              const isMenuOpen =
+                menuAnchor?.user.userId === p.userId && menuAnchor?.user.socketId === p.socketId;
 
               return (
                 <div
@@ -186,103 +208,36 @@ export function ParticipantsModal({
                     {canModerate ? (
                       !isMe ? (
                         <div className="w-7 h-7 flex items-center justify-center shrink-0">
-                          <div className="relative">
-                            <button
-                              onClick={() =>
-                                setActiveMenuUserId(isMenuOpen ? null : (p.userId || p.socketId))
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isMenuOpen) {
+                                setMenuAnchor(null);
+                                return;
                               }
-                              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                                isMenuOpen
-                                  ? 'bg-white/20 text-white'
-                                  : 'text-white/60 hover:text-white hover:bg-white/10'
-                              }`}
-                              title="Member options"
-                              aria-expanded={isMenuOpen}
-                            >
-                              <MoreVertical className="w-4 h-4" strokeWidth={1.75} />
-                            </button>
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const spaceBelow = window.innerHeight - rect.bottom;
+                              const menuEstimatedHeight = 175;
+                              const openUpwards = spaceBelow < menuEstimatedHeight;
 
-                            {isMenuOpen && (
-                              <>
-                                <div
-                                  className="fixed inset-0 z-20 cursor-pointer"
-                                  onClick={() => setActiveMenuUserId(null)}
-                                />
-                                <div className="absolute right-0 top-full mt-1 z-30 w-44 rounded-2xl glass-white-card p-1.5 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-100 text-left border border-white/30 backdrop-blur-2xl">
-                                  {isHost ? (
-                                    <>
-                                      {/* 1. Make Moderator / Demote */}
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setActiveMenuUserId(null);
-                                          openRoleDialog(p);
-                                        }}
-                                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-white/90 hover:text-white hover:bg-white/15 transition-colors text-left cursor-pointer font-medium"
-                                      >
-                                        {p.role === 'moderator' ? (
-                                          <>
-                                            <Eye className="w-3.5 h-3.5 text-white/80 shrink-0" strokeWidth={1.75} />
-                                            <span>Demote to Viewer</span>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <ShieldCheck className="w-3.5 h-3.5 text-white/80 shrink-0" strokeWidth={1.75} />
-                                            <span>Make Moderator</span>
-                                          </>
-                                        )}
-                                      </button>
-
-                                      {/* 2. Promote to Host */}
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setActiveMenuUserId(null);
-                                          openTransferDialog(p);
-                                        }}
-                                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-white/90 hover:text-white hover:bg-white/15 transition-colors text-left cursor-pointer font-medium"
-                                      >
-                                        <Crown className="w-3.5 h-3.5 text-white/80 shrink-0" strokeWidth={1.75} />
-                                        <span>Promote to Host</span>
-                                      </button>
-
-                                      <div className="my-1 h-px bg-white/15" />
-
-                                      {/* 3. Remove Member */}
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setActiveMenuUserId(null);
-                                          openRemoveDialog(p);
-                                        }}
-                                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-red-200 hover:text-white hover:bg-red-500/30 transition-colors text-left cursor-pointer font-medium"
-                                      >
-                                        <UserMinus className="w-3.5 h-3.5 text-red-300 shrink-0" strokeWidth={1.75} />
-                                        <span>Remove Member</span>
-                                      </button>
-                                    </>
-                                  ) : isMod && p.role === 'participant' ? (
-                                    /* Moderator action on viewer */
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setActiveMenuUserId(null);
-                                        openRemoveDialog(p);
-                                      }}
-                                      className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-red-200 hover:text-white hover:bg-red-500/30 transition-colors text-left cursor-pointer font-medium"
-                                    >
-                                      <UserMinus className="w-3.5 h-3.5 text-red-300 shrink-0" strokeWidth={1.75} />
-                                      <span>Remove Member</span>
-                                    </button>
-                                  ) : (
-                                    <div className="px-3 py-2 text-xs text-white/70 text-center">
-                                      Host controls only
-                                    </div>
-                                  )}
-                                </div>
-                              </>
-                            )}
-                          </div>
+                              setMenuAnchor({
+                                user: p,
+                                top: openUpwards ? undefined : rect.bottom + 6,
+                                bottom: openUpwards ? window.innerHeight - rect.top + 6 : undefined,
+                                right: window.innerWidth - rect.right,
+                              });
+                            }}
+                            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                              isMenuOpen
+                                ? 'bg-white/20 text-white'
+                                : 'text-white/60 hover:text-white hover:bg-white/10'
+                            }`}
+                            title="Member options"
+                            aria-expanded={isMenuOpen}
+                          >
+                            <MoreVertical className="w-4 h-4" strokeWidth={1.75} />
+                          </button>
                         </div>
                       ) : (
                         <div className="w-7 h-7" />
@@ -296,9 +251,103 @@ export function ParticipantsModal({
         </div>
       </div>
 
+      {/* Floating Member Options Dropdown: Portaled with fixed position so it is NEVER clipped by modal scroll containers */}
+      {menuAnchor && (
+        <>
+          <div
+            className="fixed inset-0 z-[65] cursor-pointer"
+            onClick={() => setMenuAnchor(null)}
+          />
+          <div
+            style={{
+              position: 'fixed',
+              top: menuAnchor.top !== undefined ? `${menuAnchor.top}px` : undefined,
+              bottom: menuAnchor.bottom !== undefined ? `${menuAnchor.bottom}px` : undefined,
+              right: `${menuAnchor.right}px`,
+            }}
+            className="z-[70] w-48 rounded-2xl glass-white-card p-1.5 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-100 text-left text-white"
+          >
+            {isHost ? (
+              <>
+                {/* 1. Make Moderator / Demote */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = menuAnchor.user;
+                    setMenuAnchor(null);
+                    openRoleDialog(target);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-white hover:bg-white/15 transition-colors text-left cursor-pointer font-medium"
+                >
+                  {menuAnchor.user.role === 'moderator' ? (
+                    <>
+                      <Eye className="w-4 h-4 text-white shrink-0" strokeWidth={1.75} />
+                      <span className="text-white">Demote to Viewer</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="w-4 h-4 text-white shrink-0" strokeWidth={1.75} />
+                      <span className="text-white">Make Moderator</span>
+                    </>
+                  )}
+                </button>
+
+                {/* 2. Promote to Host */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = menuAnchor.user;
+                    setMenuAnchor(null);
+                    openTransferDialog(target);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-white hover:bg-white/15 transition-colors text-left cursor-pointer font-medium"
+                >
+                  <Crown className="w-4 h-4 text-white shrink-0" strokeWidth={1.75} />
+                  <span className="text-white">Promote to Host</span>
+                </button>
+
+                <div className="my-1 h-px bg-white/20" />
+
+                {/* 3. Remove Member */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = menuAnchor.user;
+                    setMenuAnchor(null);
+                    openRemoveDialog(target);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-rose-300 hover:text-white hover:bg-rose-500/25 transition-colors text-left cursor-pointer font-medium"
+                >
+                  <UserMinus className="w-4 h-4 text-rose-400 shrink-0" strokeWidth={1.75} />
+                  <span>Remove Member</span>
+                </button>
+              </>
+            ) : isMod && menuAnchor.user.role === 'participant' ? (
+              /* Moderator action on viewer */
+              <button
+                type="button"
+                onClick={() => {
+                  const target = menuAnchor.user;
+                  setMenuAnchor(null);
+                  openRemoveDialog(target);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-rose-300 hover:text-white hover:bg-rose-500/25 transition-colors text-left cursor-pointer font-medium"
+              >
+                <UserMinus className="w-4 h-4 text-rose-400 shrink-0" strokeWidth={1.75} />
+                <span>Remove Member</span>
+              </button>
+            ) : (
+              <div className="px-3 py-2 text-xs text-white/70 text-center">
+                Host controls only
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
       {/* Confirmation Dialog */}
       {dialogState.isOpen && dialogState.targetUser && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in-0 duration-150">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in-0 duration-150">
           <div
             className="absolute inset-0 cursor-pointer"
             onClick={() => setDialogState({ isOpen: false, type: 'role', targetUser: null })}

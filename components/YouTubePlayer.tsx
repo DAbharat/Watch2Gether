@@ -30,6 +30,7 @@ interface YouTubePlayerProps {
   videoId: string;
   canControl: boolean;
   onReady?: () => void;
+  onEnded?: () => void;
   onLocalPlay: (currentTime: number) => void;
   onLocalPause: (currentTime: number) => void;
   onLocalSeek: (time: number) => void;
@@ -39,6 +40,7 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
   videoId,
   canControl,
   onReady,
+  onEnded,
   onLocalPlay,
   onLocalPause,
   onLocalSeek,
@@ -52,6 +54,11 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
   useEffect(() => {
     onReadyRef.current = onReady;
   }, [onReady]);
+
+  const onEndedRef = useRef(onEnded);
+  useEffect(() => {
+    onEndedRef.current = onEnded;
+  }, [onEnded]);
 
   const canControlRef = useRef(canControl);
   useEffect(() => {
@@ -190,6 +197,8 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
               onLocalPlay(currentTime);
             } else if (event.data === 2) {
               onLocalPause(currentTime);
+            } else if (event.data === 0) {
+              onEndedRef.current?.();
             }
           },
         },
