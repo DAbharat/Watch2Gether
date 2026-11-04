@@ -142,9 +142,9 @@ export function VideoPlayerControls({
           ref={progressBarRef}
           onClick={handleProgressClick}
           className={`relative h-1.5 flex-1 bg-white/25 hover:h-2 rounded-full overflow-hidden transition-all ${
-            canControl ? 'cursor-pointer group' : 'cursor-default'
+            canControl ? 'cursor-pointer group' : 'cursor-not-allowed'
           }`}
-          title={canControl ? 'Seek video' : ''}
+          title={canControl ? 'Seek video' : 'Playback is controlled by Host and Moderators'}
         >
           <div
             className="absolute top-0 bottom-0 left-0 bg-[#F05A65] rounded-full transition-all duration-150 shadow-[0_0_8px_rgba(240,90,101,0.6)]"

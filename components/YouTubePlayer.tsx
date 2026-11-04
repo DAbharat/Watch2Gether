@@ -16,6 +16,7 @@ export interface YouTubePlayerRef {
   loadVideo: (videoId: string) => void;
   getCurrentTime: () => number;
   getDuration: () => number;
+  getPlayerState: () => number;
   isMuted: () => boolean;
   mute: () => void;
   unMute: () => void;
@@ -28,6 +29,7 @@ export interface YouTubePlayerRef {
 interface YouTubePlayerProps {
   videoId: string;
   canControl: boolean;
+  onReady?: () => void;
   onLocalPlay: (currentTime: number) => void;
   onLocalPause: (currentTime: number) => void;
   onLocalSeek: (time: number) => void;
@@ -36,6 +38,7 @@ interface YouTubePlayerProps {
 export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
   videoId,
   canControl,
+  onReady,
   onLocalPlay,
   onLocalPause,
   onLocalSeek,
@@ -45,18 +48,61 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
   const isRemoteActionRef = useRef<boolean>(false);
   const [isReady, setIsReady] = useState(false);
 
+  const onReadyRef = useRef(onReady);
+  useEffect(() => {
+    onReadyRef.current = onReady;
+  }, [onReady]);
+
+  const canControlRef = useRef(canControl);
+  useEffect(() => {
+    canControlRef.current = canControl;
+  }, [canControl]);
+
   useImperativeHandle(ref, () => ({
     playVideo: () => {
       if (!playerRef.current?.playVideo) return;
       isRemoteActionRef.current = true;
-      playerRef.current.playVideo();
+      try {
+        playerRef.current.playVideo();
+        // Fallback: If browser autoplay policy blocks unmuted audio, mute and play after 250ms
+        setTimeout(() => {
+          if (!playerRef.current) return;
+          const st = playerRef.current.getPlayerState ? playerRef.current.getPlayerState() : -1;
+          if (st === -1 || st === 2 || st === 5) {
+            try {
+              playerRef.current.mute?.();
+              playerRef.current.playVideo?.();
+            } catch {
+              // ignore
+            }
+          }
+        }, 250);
+      } catch {
+        try {
+          playerRef.current?.mute?.();
+          playerRef.current?.playVideo?.();
+        } catch {
+          // ignore
+        }
+      }
       setTimeout(() => { isRemoteActionRef.current = false; }, 600);
     },
     pauseVideo: () => {
       if (!playerRef.current?.pauseVideo) return;
       isRemoteActionRef.current = true;
-      playerRef.current.pauseVideo();
-      setTimeout(() => { isRemoteActionRef.current = false; }, 600);
+      try {
+        playerRef.current.pauseVideo();
+      } catch {}
+      // Ensure the iframe definitively paused
+      setTimeout(() => {
+        try {
+          const st = playerRef.current?.getPlayerState?.();
+          if (st === 1 || st === 3) {
+            playerRef.current?.pauseVideo?.();
+          }
+        } catch {}
+        isRemoteActionRef.current = false;
+      }, 150);
     },
     seekTo: (seconds: number) => {
       if (!playerRef.current?.seekTo) return;
@@ -75,6 +121,9 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
     },
     getDuration: () => {
       return playerRef.current?.getDuration ? playerRef.current.getDuration() : 0;
+    },
+    getPlayerState: () => {
+      return playerRef.current?.getPlayerState ? playerRef.current.getPlayerState() : -1;
     },
     isMuted: () => {
       return playerRef.current?.isMuted ? playerRef.current.isMuted() : false;
@@ -126,12 +175,15 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
         },
         events: {
           onReady: () => {
-            if (isMounted) setIsReady(true);
+            if (isMounted) {
+              setIsReady(true);
+              onReadyRef.current?.();
+            }
           },
           onStateChange: (event: any) => {
             // Ignore programmatically triggered playback changes to prevent circular feedback loops
             if (isRemoteActionRef.current) return;
-            if (!canControl) return;
+            if (!canControlRef.current) return;
 
             const currentTime = playerRef.current?.getCurrentTime() || 0;
             if (event.data === 1) {
@@ -167,7 +219,7 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
         }
       }
     };
-  }, [canControl]);
+  }, []);
 
   useEffect(() => {
     if (isReady && playerRef.current?.loadVideoById) {
@@ -188,7 +240,17 @@ export const YouTubePlayer = forwardRef<YouTubePlayerRef, YouTubePlayerProps>(({
         <div 
           className="absolute inset-0 bg-transparent z-10 cursor-not-allowed" 
           title="Playback is controlled by Host and Moderators"
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            try {
+              if (playerRef.current) {
+                const st = playerRef.current.getPlayerState?.();
+                if (st !== 1 && st !== 3) {
+                  playerRef.current.playVideo?.();
+                }
+              }
+            } catch {}
+          }}
         />
       )}
 

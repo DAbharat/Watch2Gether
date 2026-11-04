@@ -60,6 +60,56 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [floatingReactions, setFloatingReactions] = useState<ReactionData[]>([]);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
+  // 1. Clock Offset (NTP Synchronization): serverTime = Date.now() + clientServerOffset
+  const clientServerOffsetRef = useRef<number>(0);
+  const getServerNow = () => Date.now() + clientServerOffsetRef.current;
+
+  // 2. Server-Authoritative Timeline State (Master Clock)
+  const timelineRef = useRef<{
+    anchorPosition: number;
+    anchorServerTime: number;
+    isPlaying: boolean;
+    videoId: string;
+  }>({
+    anchorPosition: 0,
+    anchorServerTime: Date.now(),
+    isPlaying: false,
+    videoId: '',
+  });
+
+  const getTargetPlayheadPosition = () => {
+    const { anchorPosition, anchorServerTime, isPlaying: playing } = timelineRef.current;
+    if (!playing) return anchorPosition;
+    const serverNow = getServerNow();
+    const elapsedSec = Math.max(0, (serverNow - anchorServerTime) / 1000);
+    return Math.max(0, anchorPosition + elapsedSec);
+  };
+
+  const lastHardSeekRef = useRef<number>(0);
+  const lastLocalActionRef = useRef<number>(0);
+
+  const canControlRef = useRef<boolean>(canControl);
+  useEffect(() => {
+    canControlRef.current = canControl;
+  }, [canControl]);
+
+  const isPlayingRef = useRef<boolean>(isPlaying);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  const handlePlayerReady = () => {
+    if (!playerRef.current) return;
+    const { isPlaying: shouldPlay } = timelineRef.current;
+    const targetTime = getTargetPlayheadPosition();
+    if (targetTime > 0) {
+      playerRef.current.seekTo(targetTime);
+    }
+    if (!canControlRef.current && shouldPlay) {
+      playerRef.current.playVideo();
+    }
+  };
+
   useEffect(() => {
     let storedName = localStorage.getItem('wtg_username');
     if (!storedName) {
@@ -72,6 +122,26 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       socket.connect();
     }
 
+    // NTP ping/pong for sub-millisecond clock synchronization
+    const pingNtp = () => {
+      if (socket.connected) {
+        socket.emit('ntp_ping', { clientSendTime: Date.now() });
+      }
+    };
+
+    socket.on('ntp_pong', ({ clientSendTime, serverTime }: { clientSendTime: number; serverTime: number }) => {
+      const now = Date.now();
+      const rtt = Math.max(0, now - clientSendTime);
+      const estimatedServerTime = serverTime + (rtt / 2);
+      const offset = estimatedServerTime - now;
+
+      if (clientServerOffsetRef.current === 0) {
+        clientServerOffsetRef.current = offset;
+      } else {
+        clientServerOffsetRef.current = clientServerOffsetRef.current * 0.7 + offset * 0.3;
+      }
+    });
+
     const onConnect = () => {
       setIsConnected(true);
       setSocketId(socket.id || '');
@@ -81,6 +151,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         participantId,
         participantToken,
       });
+      // Initial NTP clock synchronization
+      pingNtp();
     };
 
     const onDisconnect = () => {
@@ -99,62 +171,178 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
 
+    const ntpInterval = setInterval(pingNtp, 4000);
+
     socket.on('sync_state', (state: RoomState) => {
+      const anchorPos = state.anchorPosition !== undefined ? state.anchorPosition : state.currentTime;
+      const anchorTime = state.anchorServerTime || getServerNow();
+
+      // If room is paused according to server state, always enforce paused!
+      if (!state.isPlaying) {
+        timelineRef.current = {
+          anchorPosition: anchorPos,
+          anchorServerTime: anchorTime,
+          isPlaying: false,
+          videoId: state.videoId,
+        };
+        setVideoId(state.videoId);
+        setIsPlaying(false);
+        setParticipants(state.participants);
+        setHostSocketId(state.hostSocketId);
+        if (state.messages && state.messages.length > 0) {
+          setMessages(state.messages);
+        }
+        if (playerRef.current && !canControlRef.current) {
+          playerRef.current.setPlaybackRate(1);
+          if (anchorPos >= 0) {
+            playerRef.current.seekTo(anchorPos);
+          }
+          playerRef.current.pauseVideo();
+        }
+        return;
+      }
+
+      // If state.isPlaying is true, drop only if anchorServerTime is older than our currently applied timeline
+      if (state.anchorServerTime && state.anchorServerTime < timelineRef.current.anchorServerTime) {
+        return;
+      }
+
+      timelineRef.current = {
+        anchorPosition: anchorPos,
+        anchorServerTime: anchorTime,
+        isPlaying: true,
+        videoId: state.videoId,
+      };
+
       setVideoId(state.videoId);
-      setIsPlaying(state.isPlaying);
+      setIsPlaying(true);
       setParticipants(state.participants);
       setHostSocketId(state.hostSocketId);
       if (state.messages && state.messages.length > 0) {
         setMessages(state.messages);
       }
 
+      // Initial alignment or recovery for viewer
+      if (playerRef.current && !canControlRef.current) {
+        const targetTime = getTargetPlayheadPosition();
+        if (targetTime >= 0) {
+          playerRef.current.seekTo(targetTime);
+        }
+        playerRef.current.playVideo();
+      }
+    });
+
+    socket.on('play', ({ currentTime, anchorPosition, anchorServerTime }: { currentTime: number; anchorPosition?: number; anchorServerTime?: number }) => {
+      const anchorPos = anchorPosition !== undefined ? anchorPosition : currentTime;
+      const anchorTime = anchorServerTime || getServerNow();
+
+      if (anchorTime < timelineRef.current.anchorServerTime) return;
+
+      timelineRef.current = {
+        anchorPosition: anchorPos,
+        anchorServerTime: anchorTime,
+        isPlaying: true,
+        videoId: timelineRef.current.videoId,
+      };
+
+      setIsPlaying(true);
+
       if (playerRef.current) {
-        if (state.isPlaying) {
-          playerRef.current.playVideo();
-        } else {
+        const targetTime = getTargetPlayheadPosition();
+        if (targetTime >= 0) {
+          playerRef.current.seekTo(targetTime);
+        }
+        playerRef.current.setPlaybackRate(1);
+        playerRef.current.playVideo();
+      }
+    });
+
+    socket.on('pause', ({ currentTime, anchorPosition, anchorServerTime }: { currentTime: number; anchorPosition?: number; anchorServerTime?: number }) => {
+      const anchorPos = anchorPosition !== undefined ? anchorPosition : currentTime;
+      const anchorTime = anchorServerTime || getServerNow();
+
+      // Pause from host is an absolute directive: always apply
+      timelineRef.current = {
+        anchorPosition: anchorPos,
+        anchorServerTime: anchorTime,
+        isPlaying: false,
+        videoId: timelineRef.current.videoId,
+      };
+
+      setIsPlaying(false);
+
+      if (playerRef.current) {
+        playerRef.current.setPlaybackRate(1);
+        if (anchorPos !== undefined && !isNaN(anchorPos) && anchorPos >= 0) {
+          playerRef.current.seekTo(anchorPos);
+        }
+        playerRef.current.pauseVideo();
+      }
+    });
+
+    socket.on('seek', ({ time, anchorPosition, anchorServerTime }: { time: number; anchorPosition?: number; anchorServerTime?: number }) => {
+      const anchorPos = anchorPosition !== undefined ? anchorPosition : time;
+      const anchorTime = anchorServerTime || getServerNow();
+
+      if (anchorTime < timelineRef.current.anchorServerTime) return;
+
+      timelineRef.current.anchorPosition = anchorPos;
+      timelineRef.current.anchorServerTime = anchorTime;
+
+      if (playerRef.current) {
+        const targetTime = getTargetPlayheadPosition();
+        playerRef.current.seekTo(targetTime);
+        playerRef.current.setPlaybackRate(1);
+      }
+    });
+
+    socket.on('playback_sync', ({ currentTime, isPlaying: roomIsPlaying, anchorPosition, anchorServerTime }: { currentTime: number; isPlaying: boolean; anchorPosition?: number; anchorServerTime?: number }) => {
+      const anchorPos = anchorPosition !== undefined ? anchorPosition : currentTime;
+      const anchorTime = anchorServerTime || getServerNow();
+
+      if (!roomIsPlaying) {
+        timelineRef.current = {
+          anchorPosition: anchorPos,
+          anchorServerTime: anchorTime,
+          isPlaying: false,
+          videoId: timelineRef.current.videoId,
+        };
+        setIsPlaying(false);
+        if (playerRef.current) {
           playerRef.current.pauseVideo();
         }
-
-        // Re-align local player if playback drift exceeds 1.5 seconds
-        const localTime = playerRef.current.getCurrentTime();
-        if (Math.abs(localTime - state.currentTime) > 1.5) {
-          playerRef.current.seekTo(state.currentTime);
-        }
+        return;
       }
-    });
 
-    socket.on('play', ({ currentTime }: { currentTime: number }) => {
+      if (anchorTime < timelineRef.current.anchorServerTime && timelineRef.current.isPlaying) return;
+
+      timelineRef.current = {
+        anchorPosition: anchorPos,
+        anchorServerTime: anchorTime,
+        isPlaying: true,
+        videoId: timelineRef.current.videoId,
+      };
+
+      if (canControlRef.current || !playerRef.current) return;
+
+      const pState = playerRef.current.getPlayerState();
       setIsPlaying(true);
-      if (playerRef.current) {
+      if (pState !== 1 && pState !== 3) {
+        const targetTime = getTargetPlayheadPosition();
+        playerRef.current.seekTo(targetTime);
         playerRef.current.playVideo();
-        if (currentTime !== undefined) {
-          const local = playerRef.current.getCurrentTime();
-          if (Math.abs(local - currentTime) > 1.5) {
-            playerRef.current.seekTo(currentTime);
-          }
-        }
-      }
-    });
-
-    socket.on('pause', ({ currentTime }: { currentTime: number }) => {
-      setIsPlaying(false);
-      if (playerRef.current) {
-        playerRef.current.pauseVideo();
-        if (currentTime !== undefined) {
-          playerRef.current.seekTo(currentTime);
-        }
-      }
-    });
-
-    socket.on('seek', ({ time }: { time: number }) => {
-      if (playerRef.current) {
-        playerRef.current.seekTo(time);
       }
     });
 
     socket.on('change_video', ({ videoId: newId }: { videoId: string }) => {
       setVideoId(newId);
       setIsPlaying(true);
+      timelineRef.current = {
+        anchorPosition: 0,
+        anchorServerTime: getServerNow(),
+        isPlaying: true,
+        videoId: newId,
+      };
       if (playerRef.current) {
         playerRef.current.loadVideo(newId);
       }
@@ -202,13 +390,94 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       socket.disconnect();
     });
 
+    // Discord State Reconciliation Engine (Every 800ms)
+    // Silently matches playhead using variable playbackRate to eliminate micro-seeks and audio stuttering
+    const reconcileInterval = setInterval(() => {
+      if (canControlRef.current || !playerRef.current) return;
+
+      const pState = playerRef.current.getPlayerState();
+
+      // IF ROOM IS PAUSED: Definitively enforce pause on viewer player
+      if (!timelineRef.current.isPlaying || !isPlayingRef.current) {
+        if (pState === 1 || pState === 3) {
+          playerRef.current.pauseVideo();
+        }
+        return;
+      }
+
+      if (pState !== 1) return; // Only adjust rate when video is actively playing
+
+      const targetTime = getTargetPlayheadPosition();
+      const localTime = playerRef.current.getCurrentTime();
+      const driftSec = localTime - targetTime;
+      const absDriftMs = Math.abs(driftSec) * 1000;
+      const currentRate = playerRef.current.getPlaybackRate();
+
+      // Tier 1: Silent Drift (Δ < 150ms)
+      // Imperceptible: do nothing, leave rate at 1.0x to avoid any audio distortion
+      if (absDriftMs < 150) {
+        if (currentRate !== 1) {
+          playerRef.current.setPlaybackRate(1);
+        }
+        return;
+      }
+
+      // Tier 2: Elastic Catch-Up (150ms <= Δ < 1000ms)
+      // Smoothly speed up (1.05x) or slow down (0.95x) playback rate without cutting audio
+      if (absDriftMs >= 150 && absDriftMs < 1000) {
+        if (driftSec < 0) {
+          // Viewer is behind host: 1.05x speed
+          if (currentRate !== 1.05) {
+            playerRef.current.setPlaybackRate(1.05);
+          }
+        } else {
+          // Viewer is ahead of host: 0.95x speed
+          if (currentRate !== 0.95) {
+            playerRef.current.setPlaybackRate(0.95);
+          }
+        }
+        return;
+      }
+
+      // Tier 3: Hard Snap Sync (Δ >= 1000ms)
+      // Severe lag (e.g. tab buffering / packet drop): perform hard seekTo snap
+      const now = Date.now();
+      if (now - lastHardSeekRef.current > 1500) {
+        lastHardSeekRef.current = now;
+        playerRef.current.seekTo(targetTime);
+        if (currentRate !== 1) {
+          playerRef.current.setPlaybackRate(1);
+        }
+      }
+    }, 800);
+
+    // Continuous precision heartbeat from controller to room (every 1000ms)
+    const heartbeatInterval = setInterval(() => {
+      if (canControlRef.current && isPlayingRef.current && playerRef.current && socket.connected) {
+        const curTime = playerRef.current.getCurrentTime();
+        if (typeof curTime === 'number' && !isNaN(curTime)) {
+          socket.emit('playback_heartbeat', {
+            roomId,
+            currentTime: curTime,
+            isPlaying: true,
+            timestamp: Date.now(),
+          });
+        }
+      }
+    }, 1000);
+
     return () => {
+      clearInterval(reconcileInterval);
+      clearInterval(ntpInterval);
+      clearInterval(heartbeatInterval);
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
+      socket.off('ntp_pong');
       socket.off('sync_state');
       socket.off('play');
       socket.off('pause');
       socket.off('seek');
+      socket.off('playback_sync');
       socket.off('change_video');
       socket.off('participants_update');
       socket.off('chat_message');
@@ -220,15 +489,21 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const handleTogglePlay = () => {
     if (!canControl || !playerRef.current) return;
+    const now = Date.now();
+    if (now - lastLocalActionRef.current < 350) return;
+    lastLocalActionRef.current = now;
+
     const currentTime = playerRef.current.getCurrentTime();
     if (isPlaying) {
       setIsPlaying(false);
       playerRef.current.pauseVideo();
-      socket.emit('pause', { roomId, currentTime });
+      playerRef.current.setPlaybackRate(1);
+      socket.emit('pause', { roomId, currentTime, timestamp: now });
     } else {
       setIsPlaying(true);
       playerRef.current.playVideo();
-      socket.emit('play', { roomId, currentTime });
+      playerRef.current.setPlaybackRate(1);
+      socket.emit('play', { roomId, currentTime, timestamp: now });
     }
   };
 
@@ -269,6 +544,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socket.emit('assign_role', { roomId, userId: targetId, targetSocketId: targetId, newRole });
   };
 
+  const handleTransferHost = (targetId: string) => {
+    socket.emit('transfer_host', { roomId, userId: targetId });
+  };
+
   const handleRemoveUser = (targetId: string) => {
     socket.emit('kick_user', { roomId, userId: targetId, targetSocketId: targetId });
   };
@@ -292,8 +571,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   }
 
   return (
-    <div className="h-screen w-screen max-h-screen overflow-hidden text-white flex flex-col justify-center items-center p-3 sm:p-5 lg:p-7 relative select-none">
-      {/* Background Image: watch2gether.jpg (less brighter with subtle dark veil) */}
+    <div className="h-screen w-screen max-h-screen overflow-hidden text-white flex flex-col justify-center items-center p-3 sm:p-5 lg:p-7 xl:p-9 relative select-none">
+      {/* Background Image: watch2gether.jpg (a little more dark veil for optimal frosted glass contrast) */}
       <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden select-none">
         <Image
           src="/bg/watch2gether.jpg"
@@ -301,16 +580,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           fill
           priority
           sizes="100vw"
-          className="object-cover object-center brightness-[0.88] contrast-[1.05]"
+          className="object-cover object-center brightness-[0.66] contrast-[1.10]"
         />
-        <div className="absolute inset-0 bg-black/20" />
+        <div className="absolute inset-0 bg-black/45" />
       </div>
 
       <FloatingReactions reactions={floatingReactions} />
 
-      {/* Main Centered Application Frame (constrained to match reference mockup alignment) */}
-      <div className="w-full max-w-[1360px] 2xl:max-w-[1480px] h-full max-h-[880px] flex flex-col justify-between mx-auto overflow-hidden">
-        {/* Top Navigation & Room Banner Card matching screenshot */}
+      {/* Main Centered Application Frame: Full-width Header at top, Video & Chat below it */}
+      <div className="w-full max-w-[1140px] xl:max-w-[1200px] 2xl:max-w-[1260px] h-full max-h-[850px] flex flex-col items-stretch mx-auto overflow-hidden">
+        {/* Full-Width Header taking the entire horizontal space */}
         <RoomHeader
           roomId={roomId}
           hostParticipant={hostParticipant}
@@ -324,22 +603,31 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           onLeaveRoom={() => router.push('/')}
         />
 
-        {/* Main Content Area: Left Video & Controls + Right 2 Stacked Cards (Participants & Chat) */}
-        <div className="flex-1 min-h-0 w-full flex flex-col lg:flex-row overflow-hidden gap-3.5 lg:gap-4 xl:gap-5">
-          {/* Left Column: Video Area & Controls Bar */}
+        {/* Content Area below Header: Left (Video Player & Controls) & Right (Chat / Participants Sidebar) */}
+        <div className="flex-1 min-h-0 w-full flex flex-col lg:flex-row items-stretch overflow-hidden gap-3.5 lg:gap-4 xl:gap-5">
+          {/* Left Column: Video Player & Controls Bar */}
           <div className="flex-1 min-w-0 h-full flex flex-col justify-between overflow-hidden">
             <VideoSection
               playerRef={playerRef}
               videoId={videoId}
               isPlaying={isPlaying}
               canControl={canControl}
+              onPlayerReady={handlePlayerReady}
               onLocalPlay={(time) => {
+                const now = Date.now();
+                if (now - lastLocalActionRef.current < 350) return;
+                lastLocalActionRef.current = now;
                 setIsPlaying(true);
-                socket.emit('play', { roomId, currentTime: time });
+                playerRef.current?.setPlaybackRate(1);
+                socket.emit('play', { roomId, currentTime: time, timestamp: now });
               }}
               onLocalPause={(time) => {
+                const now = Date.now();
+                if (now - lastLocalActionRef.current < 350) return;
+                lastLocalActionRef.current = now;
                 setIsPlaying(false);
-                socket.emit('pause', { roomId, currentTime: time });
+                playerRef.current?.setPlaybackRate(1);
+                socket.emit('pause', { roomId, currentTime: time, timestamp: now });
               }}
               onLocalSeek={(time) => {
                 socket.emit('seek', { roomId, time });
@@ -349,16 +637,21 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             />
           </div>
 
-          {/* Right Column: Combined Chat & Participants Sidebar */}
-          <div className="w-full lg:w-[320px] xl:w-[350px] 2xl:w-[370px] shrink-0 h-full min-h-0 flex flex-col overflow-hidden">
+          {/* Right Column: Chat & Participants Sidebar starting below Header */}
+          <div className="w-full lg:w-[340px] xl:w-[365px] 2xl:w-[380px] shrink-0 h-full min-h-0 flex flex-col overflow-hidden">
             <RoomSidebar
               messages={messages}
               participants={participants}
               currentSocketId={socketId}
               isHost={isHost}
+              isModerator={isModerator}
               chatInput={chatInput}
               onChatInputChange={setChatInput}
               onSendMessage={handleSendMessage}
+              onSendReaction={handleSendReaction}
+              onAssignRole={handleAssignRole}
+              onTransferHost={handleTransferHost}
+              onRemoveUser={handleRemoveUser}
               onOpenModal={() => setIsParticipantsOpen(true)}
               chatBottomRef={chatBottomRef}
             />
@@ -381,6 +674,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         participants={participants}
         currentSocketId={socketId}
         isHost={isHost}
+        isModerator={isModerator}
         onAssignRole={handleAssignRole}
         onRemoveUser={handleRemoveUser}
       />

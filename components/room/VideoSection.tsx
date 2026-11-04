@@ -15,6 +15,7 @@ interface VideoSectionProps {
   onLocalSeek: (time: number) => void;
   onTogglePlay: () => void;
   onOpenChangeVideo?: () => void;
+  onPlayerReady?: () => void;
 }
 
 export function VideoSection({
@@ -27,6 +28,7 @@ export function VideoSection({
   onLocalSeek,
   onTogglePlay,
   onOpenChangeVideo,
+  onPlayerReady,
 }: VideoSectionProps) {
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const [videoWidth, setVideoWidth] = useState<number | null>(null);
@@ -77,6 +79,7 @@ export function VideoSection({
             ref={playerRef}
             videoId={videoId}
             canControl={canControl}
+            onReady={onPlayerReady}
             onLocalPlay={onLocalPlay}
             onLocalPause={onLocalPause}
             onLocalSeek={onLocalSeek}

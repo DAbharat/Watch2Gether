@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, MoreVertical, ShieldCheck, Eye, UserMinus } from 'lucide-react';
+import { X, MoreVertical, ShieldCheck, Eye, Crown, UserMinus } from 'lucide-react';
 import { Role, ParticipantData } from '@/lib/types';
 import { RoleBadge } from '@/lib/roles';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -13,13 +13,15 @@ interface ParticipantsModalProps {
   participants: ParticipantData[];
   currentSocketId: string;
   isHost: boolean;
+  isModerator?: boolean;
   onAssignRole: (userId: string, role: Role) => void;
+  onTransferHost?: (userId: string) => void;
   onRemoveUser: (userId: string) => void;
 }
 
 interface DialogState {
   isOpen: boolean;
-  type: 'role' | 'remove';
+  type: 'role' | 'transfer' | 'remove';
   targetUser: ParticipantData | null;
   targetRole?: Role;
 }
@@ -30,7 +32,9 @@ export function ParticipantsModal({
   participants,
   currentSocketId,
   isHost,
+  isModerator = false,
   onAssignRole,
+  onTransferHost,
   onRemoveUser,
 }: ParticipantsModalProps) {
   const [activeMenuUserId, setActiveMenuUserId] = useState<string | null>(null);
@@ -39,6 +43,13 @@ export function ParticipantsModal({
     type: 'role',
     targetUser: null,
   });
+
+  const myParticipant = participants.find(
+    (p) => (currentSocketId && p.socketId === currentSocketId) || (currentSocketId && p.userId === currentSocketId)
+  );
+  const myRole = myParticipant?.role || (isHost ? 'host' : 'participant');
+  const isMod = isModerator || myRole === 'moderator';
+  const canModerate = isHost || isMod;
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -66,6 +77,15 @@ export function ParticipantsModal({
     });
   };
 
+  const openTransferDialog = (user: ParticipantData) => {
+    setDialogState({
+      isOpen: true,
+      type: 'transfer',
+      targetUser: user,
+      targetRole: 'host',
+    });
+  };
+
   const openRemoveDialog = (user: ParticipantData) => {
     setDialogState({
       isOpen: true,
@@ -77,8 +97,15 @@ export function ParticipantsModal({
   const handleConfirmAction = () => {
     if (!dialogState.targetUser) return;
     const targetId = dialogState.targetUser.userId || dialogState.targetUser.socketId;
+
     if (dialogState.type === 'role' && dialogState.targetRole) {
       onAssignRole(targetId, dialogState.targetRole);
+    } else if (dialogState.type === 'transfer') {
+      if (onTransferHost) {
+        onTransferHost(targetId);
+      } else {
+        onAssignRole(targetId, 'host');
+      }
     } else if (dialogState.type === 'remove') {
       onRemoveUser(targetId);
     }
@@ -86,7 +113,7 @@ export function ParticipantsModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in-0 duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in-0 duration-150">
       <div className="absolute inset-0 cursor-pointer" onClick={onClose} />
 
       <div
@@ -152,13 +179,13 @@ export function ParticipantsModal({
                     </div>
                   </div>
 
-                  {/* Right side: Role Badge and Host Menu */}
+                  {/* Right side: Role Badge and Host/Mod Menu */}
                   <div className="flex items-center gap-1.5 shrink-0 ml-auto">
                     <RoleBadge role={p.role} className="w-24 justify-center text-xs" size={13} />
 
-                    {isHost && (
-                      <div className="w-7 h-7 flex items-center justify-center shrink-0">
-                        {!isMe && (
+                    {canModerate ? (
+                      !isMe ? (
+                        <div className="w-7 h-7 flex items-center justify-center shrink-0">
                           <div className="relative">
                             <button
                               onClick={() =>
@@ -181,48 +208,86 @@ export function ParticipantsModal({
                                   className="fixed inset-0 z-20 cursor-pointer"
                                   onClick={() => setActiveMenuUserId(null)}
                                 />
-                                <div className="absolute right-0 top-full mt-1 z-30 w-44 rounded-2xl glass-white-card p-1.5 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-100 text-left">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setActiveMenuUserId(null);
-                                      openRoleDialog(p);
-                                    }}
-                                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-white/90 hover:text-white hover:bg-white/15 transition-colors text-left cursor-pointer font-medium"
-                                  >
-                                    {p.role === 'moderator' ? (
-                                      <>
-                                        <Eye className="w-3.5 h-3.5 text-white/80 shrink-0" strokeWidth={1.75} />
-                                        <span>Demote to Viewer</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <ShieldCheck className="w-3.5 h-3.5 text-white/80 shrink-0" strokeWidth={1.75} />
-                                        <span>Make Moderator</span>
-                                      </>
-                                    )}
-                                  </button>
+                                <div className="absolute right-0 top-full mt-1 z-30 w-44 rounded-2xl glass-white-card p-1.5 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-100 text-left border border-white/30 backdrop-blur-2xl">
+                                  {isHost ? (
+                                    <>
+                                      {/* 1. Make Moderator / Demote */}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveMenuUserId(null);
+                                          openRoleDialog(p);
+                                        }}
+                                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-white/90 hover:text-white hover:bg-white/15 transition-colors text-left cursor-pointer font-medium"
+                                      >
+                                        {p.role === 'moderator' ? (
+                                          <>
+                                            <Eye className="w-3.5 h-3.5 text-white/80 shrink-0" strokeWidth={1.75} />
+                                            <span>Demote to Viewer</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <ShieldCheck className="w-3.5 h-3.5 text-white/80 shrink-0" strokeWidth={1.75} />
+                                            <span>Make Moderator</span>
+                                          </>
+                                        )}
+                                      </button>
 
-                                  <div className="my-1 h-px bg-white/15" />
+                                      {/* 2. Promote to Host */}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveMenuUserId(null);
+                                          openTransferDialog(p);
+                                        }}
+                                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-white/90 hover:text-white hover:bg-white/15 transition-colors text-left cursor-pointer font-medium"
+                                      >
+                                        <Crown className="w-3.5 h-3.5 text-white/80 shrink-0" strokeWidth={1.75} />
+                                        <span>Promote to Host</span>
+                                      </button>
 
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setActiveMenuUserId(null);
-                                      openRemoveDialog(p);
-                                    }}
-                                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-red-200 hover:text-white hover:bg-red-500/30 transition-colors text-left cursor-pointer font-medium"
-                                  >
-                                    <UserMinus className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-                                    <span>Remove Member</span>
-                                  </button>
+                                      <div className="my-1 h-px bg-white/15" />
+
+                                      {/* 3. Remove Member */}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveMenuUserId(null);
+                                          openRemoveDialog(p);
+                                        }}
+                                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-red-200 hover:text-white hover:bg-red-500/30 transition-colors text-left cursor-pointer font-medium"
+                                      >
+                                        <UserMinus className="w-3.5 h-3.5 text-red-300 shrink-0" strokeWidth={1.75} />
+                                        <span>Remove Member</span>
+                                      </button>
+                                    </>
+                                  ) : isMod && p.role === 'participant' ? (
+                                    /* Moderator action on viewer */
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setActiveMenuUserId(null);
+                                        openRemoveDialog(p);
+                                      }}
+                                      className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-red-200 hover:text-white hover:bg-red-500/30 transition-colors text-left cursor-pointer font-medium"
+                                    >
+                                      <UserMinus className="w-3.5 h-3.5 text-red-300 shrink-0" strokeWidth={1.75} />
+                                      <span>Remove Member</span>
+                                    </button>
+                                  ) : (
+                                    <div className="px-3 py-2 text-xs text-white/70 text-center">
+                                      Host controls only
+                                    </div>
+                                  )}
                                 </div>
                               </>
                             )}
                           </div>
-                        )}
-                      </div>
-                    )}
+                        </div>
+                      ) : (
+                        <div className="w-7 h-7" />
+                      )
+                    ) : null}
                   </div>
                 </div>
               );
@@ -238,7 +303,7 @@ export function ParticipantsModal({
             className="absolute inset-0 cursor-pointer"
             onClick={() => setDialogState({ isOpen: false, type: 'role', targetUser: null })}
           />
-          <div className="relative z-10 w-full max-w-md rounded-3xl glass-white-card p-6 shadow-2xl animate-in zoom-in-95 duration-150 text-left text-white">
+          <div className="relative z-10 w-full max-w-md rounded-3xl glass-white-card p-6 shadow-2xl animate-in zoom-in-95 duration-150 text-left text-white border border-white/30 backdrop-blur-2xl">
             <div className="flex items-center gap-3 mb-3">
               <Avatar size="default" className="w-9 h-9 border border-white/20 shrink-0">
                 <AvatarImage
@@ -251,37 +316,48 @@ export function ParticipantsModal({
                 </AvatarFallback>
               </Avatar>
               <div>
-                <h3 className="text-sm font-bold text-white">
+                <h3 className="text-base font-semibold text-white">
                   {dialogState.type === 'role'
                     ? dialogState.targetRole === 'moderator'
                       ? 'Make Moderator'
                       : 'Demote to Viewer'
+                    : dialogState.type === 'transfer'
+                    ? 'Promote to Host'
                     : 'Remove Member'}
                 </h3>
                 <p className="text-xs text-white/70">{dialogState.targetUser.username}</p>
               </div>
             </div>
-            <p className="text-xs text-white/90 leading-relaxed">
+            <p className="text-xs text-white/80 mt-2 leading-relaxed">
               {dialogState.type === 'role'
                 ? dialogState.targetRole === 'moderator'
-                  ? `Grant ${dialogState.targetUser.username} playback and video control permissions?`
-                  : `Revoke playback control permissions from ${dialogState.targetUser.username}?`
-                : `Are you sure you want to disconnect ${dialogState.targetUser.username} from this watch party?`}
+                  ? `Are you sure you want to make ${dialogState.targetUser.username} a moderator? They will be granted controls to play, pause, seek, and change videos for everyone.`
+                  : `Are you sure you want to demote ${dialogState.targetUser.username} to a viewer? They will no longer be able to control playback or change videos.`
+                : dialogState.type === 'transfer'
+                ? `Are you sure you want to transfer room ownership to ${dialogState.targetUser.username}? You will become a moderator.`
+                : `Are you sure you want to remove ${dialogState.targetUser.username} from the watch party? They will be disconnected from this room immediately.`}
             </p>
-            <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-white/20 mt-4">
+
+            <div className="flex items-center justify-end gap-2.5 pt-4 mt-3 border-t border-white/15">
               <button
                 type="button"
                 onClick={() => setDialogState({ isOpen: false, type: 'role', targetUser: null })}
-                className="glass-white-pill px-4 py-2 rounded-full text-xs font-semibold text-white transition-all cursor-pointer shadow-sm"
+                className="glass-white-pill px-4 py-2 rounded-full text-xs font-semibold text-white/80 hover:text-white hover:bg-white/20 border-white/20 cursor-pointer transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleConfirmAction}
-                className="px-5 py-2 rounded-full text-xs font-bold text-white bg-[#F05A65] hover:bg-[#FF7180] active:scale-95 transition-all cursor-pointer shadow-lg shadow-red-500/25"
+                className={`px-5 py-2 rounded-full text-xs font-semibold text-white transition-colors cursor-pointer shadow-sm ${
+                  dialogState.type === 'remove'
+                    ? 'bg-rose-500 hover:bg-rose-600'
+                    : dialogState.type === 'transfer'
+                    ? 'bg-[#F05A65] hover:bg-[#ff6974]'
+                    : 'bg-white/20 hover:bg-white/30 border border-white/25'
+                }`}
               >
-                Confirm
+                Proceed
               </button>
             </div>
           </div>

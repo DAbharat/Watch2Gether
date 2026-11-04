@@ -18,6 +18,8 @@ export interface RoomState {
   hostSocketId: string;
   participants: ParticipantData[];
   messages?: ChatMessage[];
+  anchorPosition?: number;
+  anchorServerTime?: number;
 }
 
 export interface ChatMessage {
