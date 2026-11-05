@@ -30,7 +30,21 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const socket = getSocket();
   const playerRef = useRef<YouTubePlayerRef>(null);
 
-  const { participantId, participantToken } = getStableParticipant(roomId);
+  const { participantId: initialId, participantToken: initialToken } = getStableParticipant(roomId);
+  const [participantId, setParticipantId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = sessionStorage.getItem(`wtg_uid_${roomId}`);
+      if (stored) return stored;
+    }
+    return initialId;
+  });
+  const [participantToken, setParticipantToken] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = sessionStorage.getItem(`wtg_token_${roomId}`);
+      if (stored) return stored;
+    }
+    return initialToken;
+  });
 
   const [username, setUsername] = useState<string>('');
   const [socketId, setSocketId] = useState<string>('');
@@ -57,6 +71,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [isNameModalOpen, setIsNameModalOpen] = useState<boolean>(false);
 
   const [copied, setCopied] = useState<boolean>(false);
+  const [roomNotFound, setRoomNotFound] = useState<boolean>(false);
+  const [hostGrace, setHostGrace] = useState<{ hostId: string; deadline: number; remaining: number } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState<string>('');
   const [typingUsers, setTypingUsers] = useState<{ userId: string; username: string }[]>([]);
@@ -92,6 +108,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const lastHardSeekRef = useRef<number>(0);
   const lastLocalActionRef = useRef<number>(0);
+  const lastKickedUserIdRef = useRef<string | null>(null);
 
   const canControlRef = useRef<boolean>(canControl);
   useEffect(() => {
@@ -102,6 +119,19 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
+
+  useEffect(() => {
+    if (!hostGrace) return;
+    const interval = setInterval(() => {
+      const sec = Math.max(0, Math.ceil((hostGrace.deadline - Date.now()) / 1000));
+      if (sec <= 0) {
+        setHostGrace(null);
+      } else {
+        setHostGrace((prev) => (prev ? { ...prev, remaining: sec } : null));
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [hostGrace?.deadline]);
 
   const handlePlayerReady = () => {
     if (!playerRef.current) return;
@@ -161,11 +191,20 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     const onConnect = () => {
       setIsConnected(true);
       setSocketId(socket.id || '');
+      try {
+        if (!sessionStorage.getItem(`wtg_room_created_${roomId}`)) {
+          sessionStorage.setItem(`wtg_room_created_${roomId}`, Date.now().toString());
+        }
+      } catch {
+        // ignore
+      }
+      const isCreating = typeof window !== 'undefined' && window.location.search.includes('create=true');
       socket.emit('join_room', {
         roomId,
         username: storedName,
         participantId,
         participantToken,
+        isCreating,
       });
       // Initial NTP clock synchronization
       pingNtp();
@@ -405,7 +444,26 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       if (updatedList && updatedList.length > 0) {
         setParticipants(updatedList);
       } else if (userId) {
-        setParticipants((prev) => prev.filter((p) => p.userId !== userId));
+        setParticipants((prev) => prev.filter((p) => p.userId !== userId && p.socketId !== userId));
+      }
+    });
+
+    socket.on('participant_removed', ({ userId, participants: updatedList }: { userId?: string; participants?: ParticipantData[] }) => {
+      let removedName = '';
+      setParticipants((prev) => {
+        const found = prev.find((p) => p.userId === userId || p.socketId === userId);
+        if (found) removedName = found.username;
+        if (updatedList && updatedList.length > 0) return updatedList;
+        return prev.filter((p) => p.userId !== userId && p.socketId !== userId);
+      });
+
+      if (lastKickedUserIdRef.current && (lastKickedUserIdRef.current === userId)) {
+        lastKickedUserIdRef.current = null;
+      } else if (removedName && userId !== participantId && userId !== socketId) {
+        toast.add({
+          description: `${removedName} is removed from the room`,
+          type: 'info',
+        });
       }
     });
 
@@ -493,6 +551,48 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         description: message,
         type: type === 'success' ? 'success' : 'info',
       });
+    });
+
+    socket.on('room_not_found', () => {
+      setRoomNotFound(true);
+    });
+
+    socket.on('error_message', ({ message }: { message: string }) => {
+      if (message === 'This room no longer exists.') {
+        setRoomNotFound(true);
+      }
+      toast.add({
+        title: 'Room Notification',
+        description: message,
+        type: 'warning',
+      });
+    });
+
+    socket.on('toast_notification', ({ title, message, type }: { title?: string; message: string; type?: any }) => {
+      toast.add({
+        title: title || 'Watch Party',
+        description: message,
+        type: type || 'info',
+      });
+    });
+
+    socket.on('host_grace_started', ({ hostId, deadline, remainingSeconds }: { hostId: string; deadline: number; remainingSeconds: number }) => {
+      setHostGrace({ hostId, deadline, remaining: remainingSeconds });
+    });
+
+    socket.on('host_grace_cancelled', () => {
+      setHostGrace(null);
+    });
+
+    socket.on('session_identity', ({ userId, token }: { userId: string; token: string }) => {
+      setParticipantId(userId);
+      setParticipantToken(token);
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.setItem(`wtg_uid_${roomId}`, userId);
+          sessionStorage.setItem(`wtg_token_${roomId}`, token);
+        } catch {}
+      }
     });
 
     // Discord State Reconciliation Engine (Every 800ms)
@@ -592,12 +692,19 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       socket.off('chat_message');
       socket.off('reaction');
       socket.off('role_changed');
+      socket.off('participant_removed');
       socket.off('kicked');
       socket.off('requests_sync');
       socket.off('request_created');
       socket.off('request_updated');
       socket.off('queue_updated');
       socket.off('request_notification');
+      socket.off('room_not_found');
+      socket.off('error_message');
+      socket.off('toast_notification');
+      socket.off('host_grace_started');
+      socket.off('host_grace_cancelled');
+      socket.off('session_identity');
     };
   }, [roomId]);
 
@@ -655,6 +762,30 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     });
   };
 
+  const handleLeaveRoom = () => {
+    try {
+      const inviteUrl = typeof window !== 'undefined' ? `${window.location.origin}/room/${roomId}` : `/room/${roomId}`;
+      const existingCreated = sessionStorage.getItem(`wtg_room_created_${roomId}`);
+      const createdAt = existingCreated ? parseInt(existingCreated, 10) : Date.now();
+      const expiresAt = createdAt + 24 * 60 * 60 * 1000; // 24-hour room deadline
+
+      sessionStorage.setItem(
+        'wtg_last_left_room',
+        JSON.stringify({
+          roomId,
+          inviteUrl,
+          leftAt: Date.now(),
+          createdAt,
+          expiresAt,
+          shown: false, // Ensure it only shows once
+        })
+      );
+    } catch {
+      // ignore
+    }
+    router.push(`/?left=${encodeURIComponent(roomId)}`);
+  };
+
   const handleAssignRole = (targetId: string, newRole: Role) => {
     socket.emit('assign_role', { roomId, userId: targetId, targetSocketId: targetId, newRole });
   };
@@ -664,7 +795,17 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   };
 
   const handleRemoveUser = (targetId: string) => {
-    socket.emit('kick_user', { roomId, userId: targetId, targetSocketId: targetId });
+    const target = participants.find((p) => p.userId === targetId || p.socketId === targetId);
+    const targetName = target?.username || 'Participant';
+
+    lastKickedUserIdRef.current = targetId;
+    setParticipants((prev) => prev.filter((p) => p.userId !== targetId && p.socketId !== targetId));
+    socket.emit('remove_participant', { roomId, userId: targetId, targetSocketId: targetId });
+
+    toast.add({
+      description: `${targetName} is removed from the room`,
+      type: 'info',
+    });
   };
 
   const handleRequestVideo = (videoUrl: string) => {
@@ -718,6 +859,50 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     });
   };
 
+  if (roomNotFound) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center relative select-none">
+        <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden select-none">
+          <Image
+            src="/bg/watch2gether.jpg"
+            alt="Sunset Background"
+            fill
+            priority
+            sizes="100vw"
+            className="object-cover object-center brightness-[0.66] contrast-[1.10]"
+          />
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-md" />
+        </div>
+        <div className="glass-white-card p-8 rounded-3xl border border-white/20 max-w-md w-full mx-4 text-center shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-[#F05A65] mx-auto mb-4">
+            <AlertCircle className="w-6 h-6 stroke-[2.2]" />
+          </div>
+          <h1 className="text-xl font-bold mb-2 text-white">This room no longer exists</h1>
+          <p className="text-white/70 text-xs mb-6 leading-relaxed">
+            The room may have expired after being empty or the room code you entered is invalid.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2.5 justify-center">
+            <button
+              onClick={() => {
+                const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+                router.push(`/room/${randomCode}?create=true`);
+              }}
+              className="px-5 py-2.5 rounded-full bg-[#F05A65] hover:bg-[#FF7180] text-white font-bold text-xs shadow-lg transition-all cursor-pointer"
+            >
+              Create New Room
+            </button>
+            <button
+              onClick={() => router.push('/')}
+              className="px-5 py-2.5 rounded-full glass-white-pill text-white/90 hover:text-white hover:bg-white/20 font-semibold text-xs border border-white/20 transition-all cursor-pointer"
+            >
+              Return Home
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (kickedMessage) {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#0b0c0f] text-zinc-100">
@@ -767,7 +952,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             copied={copied}
             onCopyRoomLink={copyRoomLink}
             onSubmitUrl={handleChangeVideo}
-            onLeaveRoom={() => router.push('/')}
+            onLeaveRoom={handleLeaveRoom}
           />
         </div>
 
@@ -820,6 +1005,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               currentSocketId={socketId}
               isHost={isHost}
               isModerator={isModerator}
+              hostGrace={hostGrace}
               chatInput={chatInput}
               onChatInputChange={setChatInput}
               onSendMessage={handleSendMessage}
@@ -835,7 +1021,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               onResolveRequest={handleResolveRequest}
               onCopyRoomLink={copyRoomLink}
               copied={copied}
-              onLeaveRoom={() => router.push('/')}
+              onLeaveRoom={handleLeaveRoom}
               hostName={hostParticipant?.username || 'Host'}
               roomId={roomId}
               typingUsers={typingUsers}
@@ -862,7 +1048,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         currentSocketId={socketId}
         isHost={isHost}
         isModerator={isModerator}
+        hostGrace={hostGrace}
         onAssignRole={handleAssignRole}
+        onTransferHost={handleTransferHost}
         onRemoveUser={handleRemoveUser}
       />
 

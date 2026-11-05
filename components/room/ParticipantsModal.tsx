@@ -6,6 +6,7 @@ import { Role, ParticipantData } from '@/lib/types';
 import { RoleBadge } from '@/lib/roles';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { getAvatarForUser } from '@/lib/avatars';
+import { cn } from 'cn';
 
 interface ParticipantsModalProps {
   isOpen: boolean;
@@ -14,6 +15,7 @@ interface ParticipantsModalProps {
   currentSocketId: string;
   isHost: boolean;
   isModerator?: boolean;
+  hostGrace?: { hostId: string; deadline: number; remaining: number } | null;
   onAssignRole: (userId: string, role: Role) => void;
   onTransferHost?: (userId: string) => void;
   onRemoveUser: (userId: string) => void;
@@ -33,6 +35,7 @@ export function ParticipantsModal({
   currentSocketId,
   isHost,
   isModerator = false,
+  hostGrace,
   onAssignRole,
   onTransferHost,
   onRemoveUser,
@@ -164,35 +167,63 @@ export function ParticipantsModal({
 
         {/* Participants Roster with clean alignment */}
         <div className="flex-1 overflow-y-auto space-y-1 p-1 -mx-2 pr-1">
+          {hostGrace && (
+            <div className="mb-2 px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between shadow">
+              <div className="flex items-center gap-1.5 font-medium">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                <span>Host disconnected</span>
+              </div>
+              <span className="font-mono text-[11px] bg-black/30 px-2 py-0.5 rounded-full border border-white/10">
+                New host in {hostGrace.remaining}s
+              </span>
+            </div>
+          )}
           {participants.length === 0 ? (
             <p className="text-center py-8 text-xs text-white/60">No active participants</p>
           ) : (
             participants.map((p) => {
               const isMe = p.socketId === currentSocketId || p.userId === currentSocketId;
+              const isDisconnected = p.connected === false;
               const isMenuOpen =
                 menuAnchor?.user.userId === p.userId && menuAnchor?.user.socketId === p.socketId;
 
               return (
                 <div
                   key={p.userId || p.socketId}
-                  className="group px-3 py-2.5 rounded-2xl flex items-center justify-between gap-3 text-xs hover:bg-white/10 transition-colors relative"
+                  className={cn(
+                    "group px-3 py-2.5 rounded-2xl flex items-center justify-between gap-3 text-xs hover:bg-white/10 transition-colors relative",
+                    isDisconnected && "opacity-75"
+                  )}
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <Avatar size="default" className="w-9 h-9 shrink-0 border border-white/20">
-                      <AvatarImage
-                        src={getAvatarForUser(p, participants)}
-                        alt={p.username}
-                        className="object-cover"
+                    <div className="relative shrink-0">
+                      <Avatar size="default" className="w-9 h-9 border border-white/20">
+                        <AvatarImage
+                          src={getAvatarForUser(p, participants)}
+                          alt={p.username}
+                          className="object-cover"
+                        />
+                        <AvatarFallback className="bg-white/15 text-white font-semibold text-xs">
+                          {p.username.charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span
+                        className={cn(
+                          "absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-black/80",
+                          isDisconnected ? "bg-amber-400/90" : "bg-emerald-400"
+                        )}
                       />
-                      <AvatarFallback className="bg-white/15 text-white font-semibold text-xs">
-                        {p.username.charAt(0).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
+                    </div>
 
                     <div className="min-w-0 flex items-center gap-1.5">
                       <span className="font-semibold text-sm text-white truncate">
                         {p.username}
                       </span>
+                      {isDisconnected && (
+                        <span className="text-[11px] text-amber-300/80 font-normal shrink-0">
+                          (Reconnecting...)
+                        </span>
+                      )}
                       {isMe && (
                         <span className="text-xs text-white/60 font-normal shrink-0">
                           (You)

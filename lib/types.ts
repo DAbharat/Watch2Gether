@@ -7,6 +7,7 @@ export interface ParticipantData {
   role: Role;
   joinedAt: number;
   avatar?: string;
+  connected?: boolean;
 }
 
 export interface RoomState {

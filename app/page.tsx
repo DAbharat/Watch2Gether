@@ -5,10 +5,15 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { 
   Play, Users, Shield, ArrowRight, Video, MessageSquare, 
-  Radio, Zap, Check, ChevronDown, LogIn, Eye, Sliders, RefreshCw
+  Radio, Zap, Check, ChevronDown, LogIn, Eye, Sliders, RefreshCw, X, Copy
 } from 'lucide-react';
 import { toast } from '@/components/ui/toast';
 import { SHADCN_AVATARS } from '@/lib/avatars';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 
 interface RevealOnScrollProps {
   children: React.ReactNode;
@@ -60,11 +65,148 @@ export default function HomePage() {
   const [username, setUsername] = useState('');
   const [joinRoomCode, setJoinRoomCode] = useState('');
   const [activeTab, setActiveTab] = useState<'create' | 'join'>('create');
+  const [leftRoom, setLeftRoom] = useState<{ roomId: string; inviteUrl: string } | null>(null);
+  const [isRejoinOpen, setIsRejoinOpen] = useState(false);
+  const [hasCopiedInvite, setHasCopiedInvite] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('wtg_username');
     if (saved) setUsername(saved);
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const leftParam = params.get('left');
+      let stored: {
+        roomId: string;
+        inviteUrl: string;
+        leftAt?: number;
+        createdAt?: number;
+        expiresAt?: number;
+        shown?: boolean;
+      } | null = null;
+
+      try {
+        const raw = sessionStorage.getItem('wtg_last_left_room');
+        if (raw) stored = JSON.parse(raw);
+      } catch {
+        // ignore
+      }
+
+      const effectiveRoomId = leftParam || stored?.roomId;
+      if (effectiveRoomId) {
+        const now = Date.now();
+        const ROOM_LIFETIME_MS = 24 * 60 * 60 * 1000; // 24-hour room lifespan
+        const expiresAt =
+          stored?.expiresAt ||
+          (stored?.createdAt ? stored.createdAt + ROOM_LIFETIME_MS : stored?.leftAt ? stored.leftAt + ROOM_LIFETIME_MS : now + ROOM_LIFETIME_MS);
+
+        // 1. Strict Deadline Check: If past 24 hours (e.g. 24:00:01), room is expired. Do not show!
+        if (now >= expiresAt) {
+          try {
+            sessionStorage.removeItem('wtg_last_left_room');
+          } catch {
+            // ignore
+          }
+          if (leftParam) {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('left');
+            window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+          }
+          return;
+        }
+
+        // 2. Show Only Once: Prevent hampering UX on page refreshes or subsequent navigation
+        const alreadyShown = stored?.shown === true && !leftParam;
+        if (alreadyShown) {
+          return;
+        }
+
+        const inviteUrl = stored?.inviteUrl || `${window.location.origin}/room/${effectiveRoomId}`;
+        setLeftRoom({ roomId: effectiveRoomId, inviteUrl });
+        setIsRejoinOpen(true);
+        setJoinRoomCode(inviteUrl);
+
+        // Mark shown: true in session storage
+        try {
+          sessionStorage.setItem(
+            'wtg_last_left_room',
+            JSON.stringify({
+              ...(stored || {}),
+              roomId: effectiveRoomId,
+              inviteUrl,
+              expiresAt,
+              shown: true,
+            })
+          );
+        } catch {
+          // ignore
+        }
+
+        // Clean query parameter from browser address bar immediately so refresh won't re-trigger
+        if (leftParam) {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('left');
+          window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+        }
+
+        // 3. Double-check live status with socket server API
+        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
+        fetch(`${socketUrl}/api/room/${encodeURIComponent(effectiveRoomId)}/exists`)
+          .then((res) => res.json())
+          .then((data) => {
+            if (data && data.exists === false) {
+              // Server confirmed room has expired or no longer exists
+              setIsRejoinOpen(false);
+              setLeftRoom(null);
+              try {
+                sessionStorage.removeItem('wtg_last_left_room');
+              } catch {
+                // ignore
+              }
+            }
+          })
+          .catch(() => {
+            // Offline/network fallback: client-side 24-hr deadline check already passed
+          });
+      }
+    }
   }, []);
+
+  const handleConfirmRejoin = () => {
+    if (leftRoom) {
+      router.push(`/room/${leftRoom.roomId}`);
+    }
+  };
+
+  const handleCancelRejoin = () => {
+    setIsRejoinOpen(false);
+    setLeftRoom(null);
+    try {
+      sessionStorage.removeItem('wtg_last_left_room');
+    } catch {
+      // ignore
+    }
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('left')) {
+        url.searchParams.delete('left');
+        window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+      }
+    }
+  };
+
+  const handleCopyInviteLink = () => {
+    if (!leftRoom?.inviteUrl) return;
+    navigator.clipboard.writeText(leftRoom.inviteUrl).then(() => {
+      setHasCopiedInvite(true);
+      setTimeout(() => setHasCopiedInvite(false), 2000);
+      toast.add({
+        title: 'Copied Link',
+        description: 'Invitation link copied to clipboard.',
+        type: 'success',
+      });
+    });
+  };
 
   const saveUsername = (name: string) => {
     const clean = name.trim();
@@ -80,7 +222,7 @@ export default function HomePage() {
     localStorage.setItem('wtg_username', finalName);
 
     const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    router.push(`/room/${randomCode}`);
+    router.push(`/room/${randomCode}?create=true`);
   };
 
   const handleJoinRoom = (e?: React.FormEvent) => {
@@ -248,6 +390,100 @@ export default function HomePage() {
                 Join with Code
               </button>
             </div>
+
+            {/* Rejoin Room Popover (triggered after leaving a room) */}
+            {leftRoom && (
+              <div className="flex justify-center mt-3.5">
+                <Popover open={isRejoinOpen} onOpenChange={setIsRejoinOpen}>
+                  <PopoverTrigger
+                    className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/30 backdrop-blur-xl text-white text-xs font-semibold shadow-lg transition-all cursor-pointer active:scale-95"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-[#F05A65]" />
+                    <span>Left room <strong>{leftRoom.roomId}</strong>? Rejoin Room</span>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    side="bottom"
+                    align="center"
+                    sideOffset={10}
+                    className="w-[92vw] max-w-[420px] bg-zinc-950/95 border border-white/20 backdrop-blur-2xl text-white rounded-2xl p-5 shadow-2xl ring-0 focus:outline-none"
+                  >
+                    <div className="flex flex-col gap-3">
+                      {/* Popover Header */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-full bg-[#F05A65]/20 flex items-center justify-center text-[#F05A65]">
+                            <RefreshCw className="w-3.5 h-3.5" />
+                          </div>
+                          <h3 className="font-bold text-sm sm:text-base text-white tracking-tight">
+                            Rejoin Room
+                          </h3>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleCancelRejoin}
+                          className="text-zinc-400 hover:text-white transition-colors cursor-pointer p-1 rounded-full hover:bg-white/10"
+                          title="Close"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Descriptive prompt text requested by user */}
+                      <p className="text-xs text-zinc-300 font-normal leading-relaxed">
+                        You can also join the same room by pasting the invitation link in the &ldquo;Join with code&rdquo; option in landing page.
+                      </p>
+
+                      {/* Input Box with link already pasted */}
+                      <div className="relative flex items-center mt-1">
+                        <input
+                          type="text"
+                          readOnly
+                          value={leftRoom.inviteUrl}
+                          onClick={(e) => (e.target as HTMLInputElement).select()}
+                          className="w-full bg-white/10 border border-white/15 rounded-xl px-3 py-2 text-xs text-zinc-100 font-mono pr-20 focus:outline-none focus:ring-1 focus:ring-[#F05A65] selection:bg-[#F05A65]"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleCopyInviteLink}
+                          className="absolute right-1 px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 active:scale-95 text-[11px] font-medium text-white transition-all flex items-center gap-1 cursor-pointer"
+                        >
+                          {hasCopiedInvite ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-400" />
+                              <span className="text-emerald-400">Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>Copy</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Action buttons: Cancel and Rejoin (peach color button) */}
+                      <div className="mt-2 flex items-center justify-end gap-2.5 pt-2 border-t border-white/10">
+                        <button
+                          type="button"
+                          onClick={handleCancelRejoin}
+                          className="px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-xs font-semibold text-zinc-200 hover:text-white transition-colors cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleConfirmRejoin}
+                          className="px-5 py-2 rounded-full bg-[#F05A65] hover:bg-[#FF7180] text-xs font-bold text-white shadow-lg shadow-[#F05A65]/25 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <LogIn className="w-3.5 h-3.5 stroke-[2.5]" />
+                          <span>Rejoin</span>
+                        </button>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            )}
           </div>
         </div>
 

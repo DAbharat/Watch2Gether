@@ -22,12 +22,17 @@ The system is architected as a decoupled, multi-tier system composed of a client
    - [O(1) Delta Join Broadcast Optimization](#o1-delta-join-broadcast-optimization)
    - [Asynchronous Non-Blocking Persistence](#asynchronous-non-blocking-persistence)
 6. [System Tradeoffs and Failure Modes](#system-tradeoffs-and-failure-modes)
-7. [Benchmark & Concurrency Load Test Results](#benchmark--concurrency-load-test-results)
-8. [Codebase Structure](#codebase-structure)
+7. [Identity & Security Trade-offs](#identity--security-trade-offs)
+   - [How Identity Works](#how-identity-works)
+   - [Identity Spoofing Protections](#identity-spoofing-protections)
+   - [Room Departure & Rejoin Popover Flow](#room-departure--rejoin-popover-flow)
+   - [Known Limitations / Future Work](#known-limitations--future-work)
+8. [Benchmark & Concurrency Load Test Results](#benchmark--concurrency-load-test-results)
+9. [Codebase Structure](#codebase-structure)
    - [Watch2Gether (Frontend)](#watch2gether-frontend)
    - [watch2gether-sockets (Backend)](#watch2gether-sockets-backend)
-9. [Configuration & Environment Variables](#configuration--environment-variables)
-10. [Local Development Setup](#local-development-setup)
+10. [Configuration & Environment Variables](#configuration--environment-variables)
+11. [Local Development Setup](#local-development-setup)
 
 ---
 
@@ -353,6 +358,46 @@ Real-time chat and reaction broadcasts must never block on disk or network datab
 
 ---
 
+## Identity & Security Trade-offs
+
+### How Identity Works
+There are no user accounts. Each participant receives a cryptographically random 256-bit bearer token stored in their browser session, while the server stores only its SHA-256 hash in Redis, scoped strictly to the room (`room:<roomId>:token:<userId>`). The token is verified once during `join_room`, attaching the verified identity to the socket connection. All subsequent events (playback control, role changes, video requests, chat messages) derive identity and roles exclusively from the socket registry and Redis, never trusting client-supplied payloads. Only the public `userId` is ever broadcast to other peers.
+
+### Identity Spoofing Protections
+- **Mandatory Verification**: A claimed `participantId` is honored only if `participantId` and `participantToken` are both provided and match the stored SHA-256 hash in Redis via constant-time comparison (`crypto.timingSafeEqual`).
+- **Automatic Downgrade**: Missing, unknown, or invalid tokens instantly generate a fresh anonymous Participant identity, preventing attackers from adopting another user's public `userId` or inheriting Host/Moderator roles.
+- **Single Live Socket Enforcement**: A single identity can only maintain one active socket per room. When a verified identity reconnects, any older socket for that user is terminated (`disconnect(true)`).
+- **Room-Scoped & Ephemeral**: Tokens are strictly room-bound and expire alongside the room's sliding 24-hour Redis TTL.
+- **Strict Permission Gates**: Playback, queue moderation, and host transfers are enforced on the server using verified session roles.
+
+### Room Departure & Rejoin Popover Flow
+- **Graceful Client Departure**: When a user leaves a room, the client preserves the room metadata, creation timestamp, and invite link in `sessionStorage` (`wtg_last_left_room`) and routes to the landing page with query context (`/?left=<roomId>`).
+- **Interactive Rejoin Popover**: On the landing page, an automatic Shadcn popover greets the user with:
+  - Header: **Rejoin Room**
+  - Explanatory guide: *"You can also join the same room by pasting the invitation link in the 'Join with code' option in landing page."*
+  - An input box with the room invitation link pre-pasted and ready to copy.
+  - Action buttons: **Rejoin** (peach accent button) for one-click re-entry with their verified session intact, and **Cancel** to dismiss and clear cached references.
+- **Form Auto-population**: The "Join with Code" tab on the landing page is simultaneously pre-populated with the invitation link, ensuring multiple frictionless re-entry paths.
+- **Strict 24-Hour Expiration Deadline**: Popovers only trigger if the room is within its active 24-hour lifecycle (`now < expiresAt`). If the user leaves near the deadline and arrives after it has elapsed (e.g. at 24:00:01), the expired state is immediately purged and the popover never displays.
+- **Single-Show UX Safeguard**: To prevent interrupting users on subsequent visits or page refreshes, the popover marks `shown: true` and cleans the URL query parameter via `window.history.replaceState` immediately upon the first view. Dismissing or canceling completely wipes cached references. Additionally, an asynchronous ping to `/api/room/:roomId/exists` verifies real-time room existence on the server.
+
+### Known Limitations / Future Work
+
+#### Known Limitations
+1. **Bearer Token Browser Binding**: A bearer token identifies a browser session rather than an authenticated human. Anyone with physical access to an unlocked device or rogue extensions with storage read access could reuse a session until expiration. *Mitigations*: Rigorous JSX plain-text escaping, strict HTTPS transport, and complete exclusion of tokens/hashes from WebSocket broadcasts, error messages, and logs.
+2. **Ephemeral Identity Recreation**: Evicted or kicked users can clear browser storage or switch to private browsing to join as a fresh anonymous identity, as bans are keyed to ephemeral session `userId` values without required user registration.
+3. **Cross-Domain Client Storage**: Because the Next.js frontend (Vercel) and Socket.IO server (Render) reside on disparate domains without a unified reverse proxy, session tokens must be stored in browser `sessionStorage`/`localStorage` rather than cross-domain `httpOnly; SameSite=Strict` cookies.
+4. **Temporary Session State**: Rooms and identities are ephemeral (24-hour sliding Redis TTL). No permanent historical user profiles, cross-room audit logs, or password recovery mechanisms exist.
+
+#### Future Work
+- **Optional OAuth / Passwordless Authentication**: Introduce optional Google/GitHub OAuth or email magic links to bind participant identities to persistent profiles without eliminating instant guest access.
+- **Unified Domain Reverse Proxy & `httpOnly` Cookies**: Deploy behind a unified apex domain or Cloudflare reverse proxy routing `/socket.io/` to the backend, enabling secure `httpOnly` cookies that eliminate JavaScript storage access entirely.
+- **IP-Based Abuse Prevention & Temporary Bans**: Implement Redis-backed sliding-window IP rate limiting and temporary IP bans to prevent kicked users from instantly circumventing room removals.
+- **Reconnection Token Rotation**: Issue fresh bearer tokens on every reconnection cycle to limit the replay window of captured credentials.
+- **WebRTC Mesh / Voice Channels**: Add low-latency peer-to-peer audio and video mesh streams alongside synchronized YouTube playback.
+
+---
+
 ## Benchmark & Concurrency Load Test Results
 
 The platform was subjected to concurrency load testing using a dedicated multi-client harness ([`scripts/loadtest.mjs`](file:///d:/CodeFiles/Watch2Gether/scripts/loadtest.mjs)). The test established 100 concurrent WebSocket connections to a live room on a deployed cloud instance (`https://your-server.onrender.com`) from a remote client location, evaluating message ingestion, packet broadcast reliability, and latency distribution.
@@ -394,6 +439,73 @@ This scenario models an extreme stress condition: all 100 connected room viewers
 | **Median Latency (p50)**               | 3,443 ms             |
 | **Average (Mean) Latency**             | 4,272.1 ms           |
 | **Connection Errors**                  | 0                    |
+
+### Scenario C: Local Mega-Scale Stress Test (10,000 Users across 100 Rooms)
+
+Executed via `node loadtest.js --more stress` targeting `http://localhost:4000`. Tests multi-room concurrency scaling with 100 independent rooms and 100 concurrent participants per room (10,000 total simulated viewers).
+
+| Metric                            | Result                                                              |
+| :-------------------------------- | :------------------------------------------------------------------ |
+| **Target Server**                 | `http://localhost:4000` (Local Node.js + In-Memory Manager + Redis) |
+| **Simulated Room Viewers**        | 10,000 concurrent users                                             |
+| **Total Rooms / Users per Room**  | 100 rooms / 100 users per room                                      |
+| **Connected Sockets**             | 9,220 (92.2% connection success)                                    |
+| **Connection Failures**           | 1,269 _(client OS ephemeral port & TCP handshake saturation)_       |
+| **Messages Ingested by Server**   | 3,600                                                               |
+| **Broadcast Packets Delivered**   | 118,589 packets                                                     |
+| **Peak Sustained Throughput**     | 5,929.4 msg/sec                                                     |
+| **Reactions Delivered**           | 15                                                                  |
+| **Minimum Latency**               | 8 ms                                                                |
+| **Average (Mean) Latency**        | 6,069.2 ms                                                          |
+| **Median Latency (p50)**          | 5,091 ms                                                            |
+| **95th Percentile Latency (p95)** | 13,378 ms                                                           |
+| **99th Percentile Latency (p99)** | 14,937 ms                                                           |
+| **Maximum Recorded Latency**      | 15,963 ms                                                           |
+| **Total Errors**                  | 1,269                                                               |
+
+### Scenario D: Render Cloud Extreme Stress (10,000 Users — Proxy Boundary Saturation)
+
+Executed via `node loadtest.js --more stress` targeting the production deployment at `https://watch2gether-socket.onrender.com`. Illustrates the physical infrastructure boundary of Render's free/starter proxy tier (capped at ~1,000 concurrent WebSocket file descriptors per service instance).
+
+| Metric                            | Result                                                                |
+| :-------------------------------- | :-------------------------------------------------------------------- |
+| **Target Server**                 | `https://watch2gether-socket.onrender.com` (Render Cloud Web Service) |
+| **Attempted Viewers**             | 10,000 concurrent users (100 rooms × 100 users/room)                  |
+| **Connected Sockets**             | 1,035 _(Render proxy ceiling reached)_                                |
+| **Connection Failures**           | 8,787 _(rejected at Render's front-facing Envoy/Nginx proxy)_         |
+| **Messages Ingested by Server**   | 1,600                                                                 |
+| **Broadcast Packets Delivered**   | 6,059 packets                                                         |
+| **Delivered Throughput**          | 302.9 msg/sec                                                         |
+| **Minimum Latency**               | 364 ms                                                                |
+| **Median Latency (p50)**          | 3,759 ms                                                              |
+| **Average (Mean) Latency**        | 7,560.7 ms                                                            |
+| **95th Percentile Latency (p95)** | 16,269 ms                                                             |
+| **99th Percentile Latency (p99)** | 16,564 ms                                                             |
+| **Maximum Recorded Latency**      | 16,621 ms                                                             |
+| **Total Errors**                  | 8,787                                                                 |
+
+### Scenario E: Render Cloud Benchmark (1,000 Users — Proxy-Optimized)
+
+Executed via `node loadtest.js --render` targeting `https://watch2gether-socket.onrender.com`. Specifically calibrated to operate within Render's free/starter tier proxy boundary (20 rooms with 50 users each = 1,000 concurrent viewers).
+
+| Metric                            | Result                                                                |
+| :-------------------------------- | :-------------------------------------------------------------------- |
+| **Target Server**                 | `https://watch2gether-socket.onrender.com` (Render Cloud Web Service) |
+| **Simulated Room Viewers**        | 1,000 concurrent users                                                |
+| **Total Rooms / Users per Room**  | 20 rooms / 50 users per room                                          |
+| **Connected Sockets**             | 693 connected _(clean connection ramp-up)_                            |
+| **Connection Failures**           | 2                                                                     |
+| **Messages Ingested by Server**   | 760                                                                   |
+| **Broadcast Packets Delivered**   | 23,305 packets                                                        |
+| **Delivered Throughput**          | 1,165.3 msg/sec                                                       |
+| **Reactions Delivered**           | 12                                                                    |
+| **Minimum Latency**               | 284 ms                                                                |
+| **Median Latency (p50)**          | 698 ms                                                                |
+| **Average (Mean) Latency**        | 694.1 ms                                                              |
+| **95th Percentile Latency (p95)** | 1,091 ms                                                              |
+| **99th Percentile Latency (p99)** | 1,299 ms                                                              |
+| **Maximum Recorded Latency**      | 1,506 ms                                                              |
+| **Total Errors**                  | 2                                                                     |
 
 ### Latency Optimization Progression
 
@@ -457,7 +569,7 @@ Watch2Gether/
 
 ### watch2gether-sockets (Backend)
 
-For dedicated backend documentation, architecture diagrams, and socket event references, see the [watch2gether-sockets Repository](https://github.com/DAbharat/watch2gether-socket/blob/main/README.md).
+For dedicated backend documentation, architecture diagrams, and socket event references, see the [watch2gether-sockets Repository](https://github.com/DAbharat/watch2gether-socket).
 
 ```
 watch2gether-sockets/

@@ -1,13 +1,68 @@
 import { io } from 'socket.io-client';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const STRESS = process.argv.includes('--stress') || process.env.MODE === 'stress';
-const SERVER_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
-const ROOM_ID = `LOAD_TEST_ROOM_${Math.floor(1000 + Math.random() * 9000)}`;
+try {
+  const envPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.env');
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, 'utf8').split('\n');
+    for (const line of lines) {
+      const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
+      if (match) {
+        const key = match[1];
+        let val = (match[2] || '').trim();
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.slice(1, -1);
+        }
+        if (!process.env[key]) {
+          process.env[key] = val;
+        }
+      }
+    }
+  }
+} catch {}
 
-const TOTAL_CLIENTS = 100;
-const RAMP_UP_MS = 5000;
+const isRenderArg = process.argv.includes('--render') || process.env.MODE === 'render';
+const moreStressIndex = process.argv.indexOf('--more');
+const isMoreStressArg =
+  !isRenderArg &&
+  ((moreStressIndex !== -1 && process.argv[moreStressIndex + 1] === 'stress') ||
+  process.argv.includes('--more-stress') ||
+  process.env.MODE === 'more-stress' ||
+  process.env.MODE === 'more stress');
+
+const RENDER_MODE = Boolean(isRenderArg);
+const MORE_STRESS = Boolean(isMoreStressArg);
+const STRESS = !RENDER_MODE && !MORE_STRESS && (process.argv.includes('--stress') || process.env.MODE === 'stress');
+
+const RENDER_URL = 'https://watch2gether-socket.onrender.com';
+const SERVER_URL = RENDER_MODE
+  ? (process.env.RENDER_URL || process.env.NEXT_PUBLIC_SOCKET_URL || RENDER_URL)
+  : (process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000');
+
+// Render free/starter proxy limit: capped at 1,000 users (20 rooms x 50 users/room) to fit proxy limits.
+// Local / dedicated servers with --more stress test 10,000 users (100 rooms x 100 users/room).
+const NUM_ROOMS = RENDER_MODE
+  ? (Number(process.env.ROOMS) || 20)
+  : (MORE_STRESS ? (Number(process.env.ROOMS) || 100) : 1);
+
+const USERS_PER_ROOM = RENDER_MODE
+  ? (Number(process.env.USERS_PER_ROOM) || 50)
+  : (MORE_STRESS ? (Number(process.env.USERS_PER_ROOM) || 100) : 100);
+
+const TOTAL_CLIENTS = (RENDER_MODE || MORE_STRESS) ? (NUM_ROOMS * USERS_PER_ROOM) : 100;
+const RAMP_UP_MS = RENDER_MODE ? 15000 : (MORE_STRESS ? (Number(process.env.RAMP_UP_MS) || 30000) : 5000);
 const DURATION_SEC = 20;
-const ACTIVE_CHATTERS = STRESS ? TOTAL_CLIENTS : 10;
+const ACTIVE_CHATTERS = RENDER_MODE
+  ? Math.min(TOTAL_CLIENTS, NUM_ROOMS * 2)
+  : (MORE_STRESS ? Math.min(TOTAL_CLIENTS, NUM_ROOMS * 2) : (STRESS ? TOTAL_CLIENTS : 10));
+
+const BASE_ROOM_ID = `LOAD_TEST_ROOM_${Math.floor(1000 + Math.random() * 9000)}`;
+const roomIds = (RENDER_MODE || MORE_STRESS)
+  ? Array.from({ length: NUM_ROOMS }, (_, i) => `${BASE_ROOM_ID}_R${i + 1}`)
+  : [BASE_ROOM_ID];
+const ROOM_ID = roomIds[0];
 
 const stats = {
   connected: 0,
@@ -32,26 +87,45 @@ function average(values) {
   return values.reduce((a, b) => a + b, 0) / values.length;
 }
 
-function createClient(index) {
+function createClient(index, roomId = ROOM_ID, isHost = false) {
+  let isConnectedOnce = false;
+
   const socket = io(SERVER_URL, {
     transports: ['websocket'],
     forceNew: true,
-    reconnection: false,
-    timeout: 8000,
+    reconnection: true,
+    reconnectionAttempts: 8,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 3000,
+    timeout: 25000,
   });
 
+  socket.roomId = roomId;
+
   socket.on('connect', () => {
-    stats.connected++;
+    if (!isConnectedOnce) {
+      isConnectedOnce = true;
+      stats.connected++;
+    }
     socket.emit('join_room', {
-      roomId: ROOM_ID,
+      roomId,
       username: `Viewer_${index}`,
       participantId: `load_usr_${index}_${Math.random().toString(36).slice(2, 7)}`,
+      isCreating: isHost,
     });
   });
 
-  socket.on('connect_error', () => {
-    stats.connectionFailed++;
-    stats.errors++;
+  socket.on('connect_error', (err) => {
+    if (!isConnectedOnce) {
+      stats.connectionFailed++;
+      stats.errors++;
+    }
+    if (stats.connectionFailed === 1) {
+      console.error(`\n[Connection Error] Failed connecting to ${SERVER_URL}: ${err?.message || err}`);
+      console.error(`Troubleshooting checklist:`);
+      console.error(`1. Make sure the socket server is running (e.g. cd d:\\CodeFiles\\watch2gether-sockets && npm run dev)`);
+      console.error(`2. Confirm the server port matches ${SERVER_URL} (or set NEXT_PUBLIC_SOCKET_URL in your .env)\n`);
+    }
   });
 
   socket.on('chat_message', (msg) => {
@@ -74,8 +148,9 @@ function sendChatBurst() {
     const socket = clients[i];
     if (!socket?.connected) continue;
 
+    const targetRoom = socket.roomId || ROOM_ID;
     socket.emit('chat_message', {
-      roomId: ROOM_ID,
+      roomId: targetRoom,
       text: `RTT:${Date.now()}:${i + 1}`,
     });
     stats.messagesSent++;
@@ -84,12 +159,13 @@ function sendChatBurst() {
   const random = clients[Math.floor(Math.random() * clients.length)];
   if (!random?.connected) return;
 
-  random.emit('reaction', { roomId: ROOM_ID, emoji: '❤️' });
+  const randomRoom = random.roomId || ROOM_ID;
+  random.emit('reaction', { roomId: randomRoom, emoji: '❤️' });
   stats.reactionsSent++;
 
-  random.emit('typing_start', { roomId: ROOM_ID });
+  random.emit('typing_start', { roomId: randomRoom });
   setTimeout(() => {
-    if (random.connected) random.emit('typing_stop', { roomId: ROOM_ID });
+    if (random.connected) random.emit('typing_stop', { roomId: randomRoom });
   }, 1000);
 }
 
@@ -101,7 +177,7 @@ function printResults() {
   console.log('RESULTS');
   console.log('='.repeat(60));
 
-  console.table({
+  const resultsTable = {
     'Viewers': { Value: TOTAL_CLIENTS },
     'Connected': { Value: stats.connected },
     'Connection failures': { Value: stats.connectionFailed },
@@ -116,7 +192,14 @@ function printResults() {
     'Latency p99': { Value: `${percentile(sorted, 0.99)} ms` },
     'Latency max': { Value: `${sorted[sorted.length - 1] ?? 0} ms` },
     'Errors': { Value: stats.errors },
-  });
+  };
+
+  if (RENDER_MODE || MORE_STRESS) {
+    resultsTable['Total Rooms'] = { Value: NUM_ROOMS };
+    resultsTable['Users Per Room'] = { Value: USERS_PER_ROOM };
+  }
+
+  console.table(resultsTable);
 
   if (avg < 50) console.log('Average latency under 50 ms.');
   else if (avg < 150) console.log('Average latency under 150 ms.');
@@ -124,13 +207,18 @@ function printResults() {
 }
 
 console.log(`Server:  ${SERVER_URL}`);
-console.log(`Room:    ${ROOM_ID}`);
-console.log(`Mode:    ${STRESS ? 'stress' : 'realistic'} (${ACTIVE_CHATTERS} chatters, ${TOTAL_CLIENTS} viewers)`);
+console.log(`Rooms:   ${NUM_ROOMS} rooms (${USERS_PER_ROOM} users/room)`);
+console.log(`Mode:    ${RENDER_MODE ? 'render-capped (1000 users max proxy limit)' : MORE_STRESS ? 'more-stress (10000 users)' : STRESS ? 'stress' : 'realistic'} (${ACTIVE_CHATTERS} chatters, ${TOTAL_CLIENTS} viewers)`);
 console.log(`Ramp-up: ${RAMP_UP_MS / 1000}s, duration: ${DURATION_SEC}s\n`);
 
 const connectGap = RAMP_UP_MS / TOTAL_CLIENTS;
 for (let i = 0; i < TOTAL_CLIENTS; i++) {
-  setTimeout(() => createClient(i + 1), i * connectGap);
+  const roomIdx = i % NUM_ROOMS;
+  const targetRoom = roomIds[roomIdx];
+  const userNumInRoom = Math.floor(i / NUM_ROOMS) + 1;
+  const isHost = userNumInRoom === 1;
+
+  setTimeout(() => createClient(i + 1, targetRoom, isHost), i * connectGap);
 }
 
 setTimeout(() => {

@@ -27,6 +27,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { getAvatarForUser } from '@/lib/avatars';
 import { RoleBadge } from '@/lib/roles';
 import { validateYouTubeUrl } from '@/lib/youtubeValidator';
+import { cn } from 'cn';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -51,6 +52,7 @@ interface RoomSidebarProps {
   currentSocketId: string;
   isHost: boolean;
   isModerator?: boolean;
+  hostGrace?: { hostId: string; deadline: number; remaining: number } | null;
   chatInput: string;
   onChatInputChange: (val: string) => void;
   onSendMessage: (e: React.FormEvent) => void;
@@ -94,6 +96,7 @@ export function RoomSidebar({
   currentSocketId,
   isHost,
   isModerator = false,
+  hostGrace,
   chatInput,
   onChatInputChange,
   onSendMessage,
@@ -482,6 +485,17 @@ export function RoomSidebar({
           <div className="flex-1 min-h-0 flex flex-col justify-between overflow-hidden">
             {/* Scrollable Participants Roster */}
             <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pt-2 pr-1">
+              {hostGrace && (
+                <div className="mb-2 px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between shadow">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                    <span>Host disconnected</span>
+                  </div>
+                  <span className="font-mono text-[11px] bg-black/30 px-2 py-0.5 rounded-full border border-white/10">
+                    New host in {hostGrace.remaining}s
+                  </span>
+                </div>
+              )}
               {participants.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-white/60 text-xs py-12">
                   <Users className="w-8 h-8 stroke-1 text-white/40 mb-2" />
@@ -490,12 +504,16 @@ export function RoomSidebar({
               ) : (
                 participants.map((p) => {
                   const isMe = p.socketId === currentSocketId || p.userId === currentSocketId;
+                  const isDisconnected = p.connected === false;
                   const avatarUrl = getAvatarForUser(p, participants);
 
                   return (
                     <div
                       key={p.userId || p.socketId}
-                      className="group px-2.5 py-2 rounded-2xl flex items-center justify-between gap-2.5 hover:bg-white/[0.08] transition-colors"
+                      className={cn(
+                        "group px-2.5 py-2 rounded-2xl flex items-center justify-between gap-2.5 hover:bg-white/[0.08] transition-colors",
+                        isDisconnected && "opacity-75"
+                      )}
                     >
                       {/* Left: Avatar with green online dot + username + (You) */}
                       <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -506,13 +524,23 @@ export function RoomSidebar({
                               {p.username.charAt(0).toUpperCase()}
                             </AvatarFallback>
                           </Avatar>
-                          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-black/80" />
+                          <span
+                            className={cn(
+                              "absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-black/80",
+                              isDisconnected ? "bg-amber-400/90" : "bg-emerald-400"
+                            )}
+                          />
                         </div>
 
                         <div className="min-w-0 flex items-center gap-1.5">
                           <span className="font-semibold text-xs text-white truncate max-w-[110px]">
                             {p.username}
                           </span>
+                          {isDisconnected && (
+                            <span className="text-[10px] text-amber-300/80 font-normal shrink-0">
+                              (Reconnecting...)
+                            </span>
+                          )}
                           {isMe && (
                             <span className="text-[11px] text-white/60 font-normal shrink-0">
                               (You)

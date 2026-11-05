@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "loadtest": "node benchmark/loadtest.js",
+    "loadtest:stress": "node benchmark/loadtest.js --stress",
+    "loadtest:more-stress": "node benchmark/loadtest.js --more stress",
+    "loadtest:render": "node benchmark/loadtest.js --render"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
