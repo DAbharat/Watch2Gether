@@ -239,6 +239,31 @@ export function RoomSidebar({
     return r.status === requestFilter;
   });
 
+  // Deduplicate participants to guarantee no duplicate cards or ghost entries
+  const deduplicatedParticipants = React.useMemo(() => {
+    const seenUsers = new Set<string>();
+    const result: ParticipantData[] = [];
+
+    // Find the current user entry if present
+    const me = participants.find(
+      (p) => currentSocketId && (p.socketId === currentSocketId || p.userId === currentSocketId)
+    );
+
+    for (const p of participants) {
+      const key = p.userId || p.socketId;
+      if (seenUsers.has(key)) continue;
+
+      // Filter out stale viewer duplicates that share my username and are disconnected
+      if (me && p !== me && p.role !== 'host' && p.username === me.username && (p.connected === false || !p.socketId)) {
+        continue;
+      }
+
+      seenUsers.add(key);
+      result.push(p);
+    }
+    return result;
+  }, [participants, currentSocketId]);
+
   return (
     <>
       <div className="w-full h-full glass-white-card rounded-2xl sm:rounded-3xl p-3 sm:p-4 flex flex-col shadow-xl overflow-hidden select-none">
@@ -272,7 +297,7 @@ export function RoomSidebar({
               <Users className="w-3.5 h-3.5 shrink-0" />
               <span>
                 <span className="hidden sm:inline">Participants</span>
-                <span className="sm:hidden">People</span> ({participants.length})
+                <span className="sm:hidden">People</span> ({deduplicatedParticipants.length})
               </span>
             </button>
 
@@ -496,13 +521,13 @@ export function RoomSidebar({
                   </span>
                 </div>
               )}
-              {participants.length === 0 ? (
+              {deduplicatedParticipants.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-white/60 text-xs py-12">
                   <Users className="w-8 h-8 stroke-1 text-white/40 mb-2" />
                   <p className="font-semibold text-white/90 text-xs">No active participants</p>
                 </div>
               ) : (
-                participants.map((p) => {
+                deduplicatedParticipants.map((p) => {
                   const isMe = p.socketId === currentSocketId || p.userId === currentSocketId;
                   const isDisconnected = p.connected === false;
                   const avatarUrl = getAvatarForUser(p, participants);

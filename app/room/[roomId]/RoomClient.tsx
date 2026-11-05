@@ -764,6 +764,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const handleLeaveRoom = () => {
     try {
+      socket.emit('leave_room', { roomId });
+      socket.disconnect();
+    } catch {
+      // ignore
+    }
+    try {
       const inviteUrl = typeof window !== 'undefined' ? `${window.location.origin}/room/${roomId}` : `/room/${roomId}`;
       const existingCreated = sessionStorage.getItem(`wtg_room_created_${roomId}`);
       const createdAt = existingCreated ? parseInt(existingCreated, 10) : Date.now();
@@ -950,6 +956,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             isConnected={isConnected}
             canControl={canControl}
             copied={copied}
+            hostGrace={hostGrace}
             onCopyRoomLink={copyRoomLink}
             onSubmitUrl={handleChangeVideo}
             onLeaveRoom={handleLeaveRoom}

@@ -81,6 +81,25 @@ export function ParticipantsCard({
     setConfirmAction({ isOpen: false, type: 'promote_mod', targetUser: null });
   };
 
+  const deduplicatedParticipants = React.useMemo(() => {
+    const seenUsers = new Set<string>();
+    const result: ParticipantData[] = [];
+    const me = participants.find(
+      (p) => currentSocketId && (p.socketId === currentSocketId || p.userId === currentSocketId)
+    );
+
+    for (const p of participants) {
+      const key = p.userId || p.socketId;
+      if (seenUsers.has(key)) continue;
+      if (me && p !== me && p.role !== 'host' && p.username === me.username && (p.connected === false || !p.socketId)) {
+        continue;
+      }
+      seenUsers.add(key);
+      result.push(p);
+    }
+    return result;
+  }, [participants, currentSocketId]);
+
   return (
     <>
       <div className="w-full h-[38%] min-h-[170px] max-h-[240px] glass-white-card rounded-2xl sm:rounded-3xl p-4 flex flex-col shadow-xl overflow-hidden shrink-0 select-none">
@@ -89,7 +108,7 @@ export function ParticipantsCard({
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4 text-white" />
             <h3 className="text-sm font-bold text-white tracking-wide">
-              Participants ({participants.length})
+              Participants ({deduplicatedParticipants.length})
             </h3>
           </div>
 
@@ -106,7 +125,7 @@ export function ParticipantsCard({
 
         {/* Scrollable Participants List */}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pt-2 pr-1">
-          {participants.map((p) => {
+          {deduplicatedParticipants.map((p) => {
             const isMe = p.socketId === currentSocketId || p.userId === currentSocketId;
             const avatarUrl = getAvatarForUser(p, participants);
 
