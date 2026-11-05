@@ -13,6 +13,7 @@ interface RoomHeaderProps {
   isConnected: boolean;
   canControl: boolean;
   copied: boolean;
+  hostGrace?: { hostId: string; deadline: number; remaining: number } | null;
   onCopyRoomLink: () => void;
   onSubmitUrl: (url: string) => void;
   onLeaveRoom: () => void;
@@ -24,6 +25,7 @@ export function RoomHeader({
   currentUser,
   participants,
   copied,
+  hostGrace,
   onCopyRoomLink,
   onLeaveRoom,
 }: RoomHeaderProps) {
@@ -54,10 +56,18 @@ export function RoomHeader({
               </button>
             </div>
 
-            <p className="text-[11px] sm:text-xs text-white/80 font-normal leading-tight mt-0.5">
-              Room: {roomId} &bull; {participants.length}{' '}
-              {participants.length === 1 ? 'member' : 'members'}
-            </p>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <p className="text-[11px] sm:text-xs text-white/80 font-normal leading-tight">
+                Room: {roomId} &bull; {participants.length}{' '}
+                {participants.length === 1 ? 'member' : 'members'}
+              </p>
+              {hostGrace && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/25 border border-amber-500/40 text-amber-200 text-[10px] font-semibold animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  Host left &bull; New host in {hostGrace.remaining}s
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
